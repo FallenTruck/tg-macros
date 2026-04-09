@@ -1,0 +1,42 @@
+{
+  "profiles": [
+    {
+      "telegram_user_id": 349553317,
+      "username": "Vaanasaurus",
+      "display_name": "Vaan",
+      "daily_target": {
+        "calories": 2200,
+        "protein_g": 160,
+        "carbs_g": 220,
+        "fat_g": 70
+      },
+      "questionnaire_answers": null,
+      "questionnaire_version": "legacy-migrated",
+      "updated_at": "2026-04-09T10:05:00",
+      "dietary_preferences": ["high_protein", "mixed_diet"],
+      "restrictions": [],
+      "preferred_cuisines": ["asian", "western"],
+      "preferred_staples": ["chicken", "rice", "eggs", "protein_shake"],
+      "preferred_tags": ["high_protein", "meal", "asian"]
+    },
+    {
+      "telegram_user_id": 559404539,
+      "username": "poojyyy20",
+      "display_name": "Pooja",
+      "daily_target": {
+        "calories": 1800,
+        "protein_g": 90,
+        "carbs_g": 220,
+        "fat_g": 55
+      },
+      "questionnaire_answers": null,
+      "questionnaire_version": "legacy-migrated",
+      "updated_at": "2026-04-09T10:05:00",
+      "dietary_preferences": ["vegetarian", "indian"],
+      "restrictions": ["vegetarian"],
+      "preferred_cuisines": ["indian", "vegetarian"],
+      "preferred_staples": ["chapati", "rice", "paneer", "curd", "dosa"],
+      "preferred_tags": ["vegetarian", "meal", "indian"]
+    }
+  ]
+}

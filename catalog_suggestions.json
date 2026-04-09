@@ -1,0 +1,34 @@
+{
+  "suggestions": [
+    {
+      "suggestion_id": "349553317_gardenia_original_wrap_1_bcb7dd08",
+      "telegram_user_id": 349553317,
+      "cluster_key": "gardenia original wrap scs reduced fat cheese heinz chilli sauce g uncooked chicken fillet tendon removed",
+      "proposed_name": "Homemade Chicken Gardenia Wrap",
+      "proposed_serving": "1 logged portion",
+      "macros": {
+        "calories": 607.0,
+        "protein_g": 82.2,
+        "carbs_g": 32.9,
+        "fat_g": 13.3
+      },
+      "tags": [
+        "high_protein",
+        "meal"
+      ],
+      "cuisines": [],
+      "eligible_telegram_user_ids": [
+        349553317
+      ],
+      "occurrence_count": 2,
+      "source_captions": [
+        "Gardenia original wrap 1  scs reduced fat cheese 2. Heinz chilli sauce. Homemade 270g uncooked chicken fillet tendon removed",
+        "Gardenia original wrap 1  scs reduced fat cheese 2. Heinz chilli sauce. Homemade 280g uncooked chicken fillet tendon removed"
+      ],
+      "first_seen_iso": "2026-03-08T20:21:53",
+      "last_seen_iso": "2026-03-09T22:46:30",
+      "status": "pending_review",
+      "notes": ""
+    }
+  ]
+}

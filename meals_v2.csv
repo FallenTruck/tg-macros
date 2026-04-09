@@ -1,0 +1,37 @@
+datetime,telegram_user_id,username,person,caption,calories,protein_g,carbs_g,fat_g,confidence,message_id
+2026-03-05T13:00:00,349553317,Vaanasaurus,vaan,"Steamed chicken and mushroom, tomatoes and eggs, white rice",650,45.0,70.0,15.0,0.7,11
+2026-03-05T22:55:15,349553317,Vaanasaurus,vaan,Ikea Duck Confit,700,40.0,40.0,40.0,0.7,13
+2026-03-05T22:57:14,559404539,poojyyy20,pooja,"Ikea 8 plant based meatballs with gravy and vegetables, mashed potato and lingonberry jam",580,20.0,70.0,15.0,0.8,15
+2026-03-06T08:00:00,349553317,Vaanasaurus,vaan,Macdonalds breakfast. Crispy mac and cheesy wrap chicken sausage with hashbrown and medium iced milo,750,35.0,85.0,25.0,0.7,21
+2026-03-06T13:45:09,349553317,Vaanasaurus,vaan,"Wingstop 8pc chicken set meal. Fries, ranch. 4 pc kecap manis 4pc garlic parmesan",1040.0,72.0,64.0,60.0,0.7,23
+2026-03-06T08:00:00,559404539,poojyyy20,pooja,"1 egg mcmuffin with garlic chilli sauce, without chicken roll",300,17.0,30.0,12.0,0.8,29
+2026-03-06T10:29:00,559404539,poojyyy20,pooja,"Aloo paratha with chickpea masala, vegetable dalia + strawberry yoghurt",520.0,17.6,72.0,12.0,0.7,35
+2026-03-06T14:00:00,559404539,poojyyy20,pooja,1 methi paratha and 1 aloo paratha with yoghurt and a bit of mango pickle,500,12.0,65.0,15.0,0.7,41
+2026-03-07T09:47:00,559404539,poojyyy20,pooja,2 dosai with coconut chutney and dhal,350,12.0,50.0,8.0,0.7,54
+2026-03-07T13:35:00,559404539,poojyyy20,pooja,Rice and sindhi kadhi + fried potato and a bit of potato chips,600,10.0,90.0,20.0,0.6,60
+2026-03-07T19:33:00,559404539,poojyyy20,pooja,1 Chaayos vada pav,350,8.0,45.0,12.0,0.7,66
+2026-03-06T23:00:00,349553317,Vaanasaurus,vaan,"Mcchicken, lychee pie, corn with whipped butter, small iced milo mcdonalds",712.0,20.8,88.0,24.0,0.7,72
+2026-03-07T10:00:00,349553317,Vaanasaurus,vaan,ON milk chocolate protein shake. 2 scoops protein and 350ml normal meiji milk,390,52.0,21.0,6.0,0.9,78
+2026-03-07T14:00:00,349553317,Vaanasaurus,vaan,Garlic fried rice with grilled salmon mushroom cream sauce,700,45.0,50.0,30.0,0.7,84
+2026-03-08T11:49:05,349553317,Vaanasaurus,vaan,ON milk chocolate protein shake. 2 scoops protein and 350ml normal meiji milk,430,52.0,20.0,6.0,0.9,86
+2026-03-08T10:00:00,559404539,poojyyy20,pooja,"Set dosa (1.5 pieces) with sambar and coconut chutney,",420.0,9.6,66.0,9.6,0.75,92
+2026-03-08T15:26:59,349553317,Vaanasaurus,vaan,Roasted chicken rice. Ate only half the rice,450,35.0,45.0,10.0,0.7,94
+2026-03-08T20:21:53,349553317,Vaanasaurus,vaan,Gardenia original wrap 1  scs reduced fat cheese 2. Heinz chilli sauce. Homemade 270g uncooked chicken fillet tendon removed,540,65.0,30.0,10.0,0.8,96
+2026-03-09T09:23:01,349553317,Vaanasaurus,vaan,ON milk chocolate protein shake. 2 scoops protein and 350ml normal meiji milk,370,48.0,18.0,3.0,0.85,98
+2026-03-09T13:14:59,349553317,Vaanasaurus,vaan,Scrambled egg with garlic fried rice some veg and salt baked chicken leg,700,55.0,50.0,30.0,0.75,100
+2026-03-08T14:55:00,559404539,poojyyy20,pooja,Pongal with mango pickle and curd,420.0,12.0,66.0,8.4,0.6,106
+2026-03-08T20:45:00,559404539,poojyyy20,pooja,"A bit of vegetable pulao, 1 chapati paneer curry and vegetable curry, 1 small piece dhokla and mint+ tamarind chutney",660.0,30.0,84.0,18.0,0.7,113
+2026-03-09T12:25:00,559404539,poojyyy20,pooja,Poha + 1 bowl of curd,420.0,14.399999999999999,60.0,9.6,0.7,119
+2026-03-09T22:46:30,349553317,Vaanasaurus,vaan,Gardenia original wrap 1  scs reduced fat cheese 2. Heinz chilli sauce. Homemade 280g uncooked chicken fillet tendon removed,674,99.5,35.7,16.6,0.820,121
+2026-03-10T09:39:11,349553317,Vaanasaurus,vaan,3 eggs scrambled with pepper salt and some grapeseed oil. 2 slices of Australian oat soft grain wholemeal break,432,25.9,32.5,22.2,0.890,125
+2026-03-10T09:40:40,349553317,Vaanasaurus,vaan,Half Rokeby protein milk smoothie banana honey and cinnamon flavour,120,15.2,8.4,2.4,0.980,127
+2026-03-10T15:22:05,349553317,Vaanasaurus,vaan,Jollibee 3pc spicy chicken with rice and gravy and mashed potatoes. Coke zero (only drank half),948,51.5,67.6,50.7,0.790,129
+2026-03-11T09:07:53,349553317,Vaanasaurus,vaan,3 eggs scrambled with spoon of butter pepper salt. 2 slices of Australian oat soft grain wholemeal bread,340,17.8,22.9,19.2,0.840,134
+2026-03-10T08:44:00,559404539,poojyyy20,pooja,Set dosa 2.5 pieces with sambar and coconut chutney,593,16.4,89.5,19.0,0.790,140
+2026-03-10T15:47:00,559404539,poojyyy20,pooja,"2 poori, sindhi kadhi, beans poriyal, half chilli bajji, little bit of vegetable pulao, little amount of pickle, 1 ubatti with ghee, little bit of ice cream and little bit of paayasam",822,16.2,114.6,34.6,0.740,147
+2026-03-10T23:38:00,559404539,poojyyy20,pooja,"Masala dosai, 1 small kofta, palak paneer, punjabi kadhi",590,19.0,61.0,29.0,0.670,153
+2026-03-11T09:49:00,559404539,poojyyy20,pooja,"1 idli, 1 vadai, coconut chutney, sambar and abit of kaara baath",468,12.8,63.3,18.8,0.800,159
+2026-03-11T13:31:07,559404539,poojyyy20,pooja,1 masala dosai,518,11.5,71.0,21.1,0.580,161
+2026-03-11T16:14:16,349553317,Vaanasaurus,vaan,Chicken kimchi fried rice,654,30.0,68.0,27.0,0.790,163
+2026-03-11T14:37:00,559404539,poojyyy20,pooja,"A bit of rice, 2 chapati, mattar paneer, black dhal and milk rice sweet",698,25.5,103.7,21.7,0.760,171
+2026-03-12T12:52:03,349553317,Vaanasaurus,vaan,Chicken rice add chicken no skin. Thai green milk tea,895,54.0,96.0,30.0,0.780,175

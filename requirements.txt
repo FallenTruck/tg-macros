@@ -1,0 +1,8 @@
+python-dotenv
+httpx
+python-telegram-bot
+fastapi
+openai
+pillow
+uvicorn[standard]
+pytest

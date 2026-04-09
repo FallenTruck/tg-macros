@@ -1,0 +1,148 @@
+{
+  "foods": [
+    {
+      "food_id": "chicken_rice_bowl",
+      "name": "Chicken Rice Bowl",
+      "serving": "1 bowl with lean chicken and rice",
+      "macros": { "calories": 560, "protein_g": 42, "carbs_g": 58, "fat_g": 16 },
+      "tags": ["meal", "high_protein", "asian", "home"],
+      "cuisines": ["asian"],
+      "eligible_telegram_user_ids": [349553317]
+    },
+    {
+      "food_id": "grilled_chicken_wrap",
+      "name": "Grilled Chicken Wrap",
+      "serving": "1 wrap with vegetables",
+      "macros": { "calories": 480, "protein_g": 38, "carbs_g": 36, "fat_g": 18 },
+      "tags": ["meal", "high_protein", "western", "home"],
+      "cuisines": ["western"],
+      "eligible_telegram_user_ids": [349553317]
+    },
+    {
+      "food_id": "double_protein_shake",
+      "name": "Double Protein Shake",
+      "serving": "2 scoops whey with milk",
+      "macros": { "calories": 380, "protein_g": 48, "carbs_g": 18, "fat_g": 6 },
+      "tags": ["snack", "high_protein", "quick"],
+      "cuisines": [],
+      "eligible_telegram_user_ids": [349553317]
+    },
+    {
+      "food_id": "egg_toast_plate",
+      "name": "Egg and Toast Plate",
+      "serving": "3 eggs with 2 slices toast",
+      "macros": { "calories": 420, "protein_g": 26, "carbs_g": 28, "fat_g": 22 },
+      "tags": ["meal", "protein", "quick", "home"],
+      "cuisines": ["western"],
+      "eligible_telegram_user_ids": [349553317]
+    },
+    {
+      "food_id": "salmon_rice_plate",
+      "name": "Salmon Rice Plate",
+      "serving": "1 plate salmon with rice and vegetables",
+      "macros": { "calories": 620, "protein_g": 40, "carbs_g": 52, "fat_g": 26 },
+      "tags": ["meal", "high_protein", "asian"],
+      "cuisines": ["asian"],
+      "eligible_telegram_user_ids": [349553317]
+    },
+    {
+      "food_id": "greek_yogurt_bowl",
+      "name": "Greek Yogurt Fruit Bowl",
+      "serving": "1 bowl yogurt with fruit and nuts",
+      "macros": { "calories": 320, "protein_g": 22, "carbs_g": 28, "fat_g": 10 },
+      "tags": ["snack", "vegetarian", "protein", "quick"],
+      "cuisines": [],
+      "eligible_telegram_user_ids": [559404539, 349553317]
+    },
+    {
+      "food_id": "tofu_veg_rice",
+      "name": "Tofu Veg Rice Bowl",
+      "serving": "1 bowl tofu, rice, mixed vegetables",
+      "macros": { "calories": 510, "protein_g": 24, "carbs_g": 58, "fat_g": 18 },
+      "tags": ["meal", "vegetarian", "asian"],
+      "cuisines": ["asian"],
+      "eligible_telegram_user_ids": [559404539]
+    },
+    {
+      "food_id": "paneer_wrap",
+      "name": "Paneer Wrap",
+      "serving": "1 wrap with paneer and vegetables",
+      "macros": { "calories": 470, "protein_g": 24, "carbs_g": 38, "fat_g": 22 },
+      "tags": ["meal", "vegetarian", "indian"],
+      "cuisines": ["indian"],
+      "eligible_telegram_user_ids": [559404539]
+    },
+    {
+      "food_id": "dal_rice_bowl",
+      "name": "Dal Rice Bowl",
+      "serving": "1 bowl dal with steamed rice",
+      "macros": { "calories": 430, "protein_g": 16, "carbs_g": 68, "fat_g": 8 },
+      "tags": ["meal", "vegetarian", "indian", "comfort"],
+      "cuisines": ["indian"],
+      "eligible_telegram_user_ids": [559404539]
+    },
+    {
+      "food_id": "chapati_paneer_combo",
+      "name": "Chapati and Paneer Combo",
+      "serving": "2 chapati with paneer curry",
+      "macros": { "calories": 520, "protein_g": 22, "carbs_g": 46, "fat_g": 24 },
+      "tags": ["meal", "vegetarian", "indian"],
+      "cuisines": ["indian"],
+      "eligible_telegram_user_ids": [559404539]
+    },
+    {
+      "food_id": "dosa_sambar_set",
+      "name": "Dosa and Sambar Set",
+      "serving": "2 dosa with sambar",
+      "macros": { "calories": 390, "protein_g": 12, "carbs_g": 58, "fat_g": 12 },
+      "tags": ["meal", "vegetarian", "indian", "light"],
+      "cuisines": ["indian"],
+      "eligible_telegram_user_ids": [559404539]
+    },
+    {
+      "food_id": "poha_curd_plate",
+      "name": "Poha with Curd",
+      "serving": "1 bowl poha with side curd",
+      "macros": { "calories": 360, "protein_g": 12, "carbs_g": 54, "fat_g": 10 },
+      "tags": ["meal", "vegetarian", "indian", "light"],
+      "cuisines": ["indian"],
+      "eligible_telegram_user_ids": [559404539]
+    },
+    {
+      "food_id": "chickpea_salad_wrap",
+      "name": "Chickpea Salad Wrap",
+      "serving": "1 wrap with chickpeas and yogurt dressing",
+      "macros": { "calories": 410, "protein_g": 18, "carbs_g": 48, "fat_g": 14 },
+      "tags": ["meal", "vegetarian", "quick"],
+      "cuisines": ["western"],
+      "eligible_telegram_user_ids": [559404539]
+    },
+    {
+      "food_id": "paneer_bhurji_toast",
+      "name": "Paneer Bhurji Toast",
+      "serving": "paneer bhurji with 2 toast slices",
+      "macros": { "calories": 440, "protein_g": 24, "carbs_g": 30, "fat_g": 22 },
+      "tags": ["meal", "vegetarian", "indian", "protein"],
+      "cuisines": ["indian"],
+      "eligible_telegram_user_ids": [559404539]
+    },
+    {
+      "food_id": "fruit_nut_snack",
+      "name": "Fruit and Nut Snack",
+      "serving": "1 fruit with a small nut portion",
+      "macros": { "calories": 240, "protein_g": 6, "carbs_g": 24, "fat_g": 12 },
+      "tags": ["snack", "vegetarian", "quick"],
+      "cuisines": [],
+      "eligible_telegram_user_ids": [559404539, 349553317]
+    },
+    {
+      "food_id": "lean_chicken_salad",
+      "name": "Lean Chicken Salad",
+      "serving": "1 salad bowl with chicken",
+      "macros": { "calories": 350, "protein_g": 36, "carbs_g": 18, "fat_g": 14 },
+      "tags": ["meal", "high_protein", "light"],
+      "cuisines": ["western"],
+      "eligible_telegram_user_ids": [349553317]
+    }
+  ]
+}
