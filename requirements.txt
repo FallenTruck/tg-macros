@@ -4,5 +4,7 @@ python-telegram-bot
 fastapi
 openai
 pillow
+urllib3
+uvicorn[standard]
 uvicorn[standard]
 pytest
