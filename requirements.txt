@@ -7,3 +7,4 @@ pillow
 urllib3
 uvicorn[standard]
 pytest
+python-multipart
