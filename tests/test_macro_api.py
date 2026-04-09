@@ -1,3 +1,4 @@
+import asyncio
 import hashlib
 import hmac
 import io
@@ -33,6 +34,36 @@ class _FakeClient:
         self.responses = _FakeResponses(output_text)
 
 
+class _FakeTelegramBot:
+    def __init__(self):
+        self.set_webhook_calls = []
+
+    async def set_webhook(self, **kwargs):
+        self.set_webhook_calls.append(kwargs)
+
+
+class _FakeTelegramApplication:
+    def __init__(self):
+        self.bot = _FakeTelegramBot()
+        self.events = []
+        self.processed_updates = []
+
+    async def initialize(self):
+        self.events.append("initialize")
+
+    async def start(self):
+        self.events.append("start")
+
+    async def stop(self):
+        self.events.append("stop")
+
+    async def shutdown(self):
+        self.events.append("shutdown")
+
+    async def process_update(self, update):
+        self.processed_updates.append(update)
+
+
 class MacroApiTests(unittest.TestCase):
     def setUp(self):
         self.tmpdir = tempfile.TemporaryDirectory()
@@ -40,6 +71,7 @@ class MacroApiTests(unittest.TestCase):
         self.client = TestClient(macro_api.app)
 
     def tearDown(self):
+        macro_api.app.state.telegram_application = None
         self.tmpdir.cleanup()
 
     def _jpg_bytes(self):
@@ -482,6 +514,61 @@ class MacroApiTests(unittest.TestCase):
 
         self.assertEqual(response.status_code, 401)
         self.assertIn("stale", response.text)
+
+    def test_start_telegram_webhook_configures_bot_application(self):
+        fake_application = _FakeTelegramApplication()
+
+        with patch.object(macro_api, "BOT_TOKEN", "token"), patch.object(
+            macro_api, "MINI_APP_URL", "https://javaanfitness.onrender.com/miniapp"
+        ), patch.object(macro_api, "TELEGRAM_WEBHOOK_BASE_URL", ""), patch.object(
+            macro_api, "TELEGRAM_WEBHOOK_SECRET", "secret-token"
+        ), patch.object(
+            macro_api, "build_telegram_application", return_value=fake_application
+        ):
+            asyncio.run(macro_api._start_telegram_webhook())
+
+        self.assertEqual(fake_application.events, ["initialize", "start"])
+        self.assertEqual(
+            fake_application.bot.set_webhook_calls,
+            [
+                {
+                    "url": "https://javaanfitness.onrender.com/telegram/webhook",
+                    "secret_token": "secret-token",
+                }
+            ],
+        )
+        self.assertIs(macro_api.app.state.telegram_application, fake_application)
+
+        asyncio.run(macro_api._stop_telegram_webhook())
+        self.assertEqual(fake_application.events[-2:], ["stop", "shutdown"])
+
+    def test_telegram_webhook_processes_update(self):
+        fake_application = _FakeTelegramApplication()
+        macro_api.app.state.telegram_application = fake_application
+
+        with patch.object(macro_api.Update, "de_json", return_value={"update_id": 1}) as de_json:
+            response = self.client.post(
+                "/telegram/webhook",
+                json={"update_id": 1, "message": {"message_id": 10}},
+            )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json(), {"ok": True})
+        de_json.assert_called_once()
+        self.assertEqual(fake_application.processed_updates, [{"update_id": 1}])
+
+    def test_telegram_webhook_rejects_invalid_secret(self):
+        macro_api.app.state.telegram_application = _FakeTelegramApplication()
+
+        with patch.object(macro_api, "TELEGRAM_WEBHOOK_SECRET", "expected-secret"):
+            response = self.client.post(
+                "/telegram/webhook",
+                json={"update_id": 1},
+                headers={"X-Telegram-Bot-Api-Secret-Token": "wrong-secret"},
+            )
+
+        self.assertEqual(response.status_code, 401)
+        self.assertIn("Invalid Telegram webhook secret", response.text)
 
 
 if __name__ == "__main__":

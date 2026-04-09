@@ -12,11 +12,12 @@ from urllib.parse import parse_qsl
 from uuid import uuid4
 
 from dotenv import load_dotenv
-from fastapi import Body, FastAPI, Form, Header, HTTPException, UploadFile
+from fastapi import Body, FastAPI, Form, Header, HTTPException, Request, UploadFile
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from openai import OpenAI
 from PIL import Image
+from telegram import Update
 
 from macro_bot.models import QUESTIONNAIRE_VERSION, QuestionnaireAnswers, UserProfile
 from macro_bot.profile_targets import (
@@ -26,6 +27,7 @@ from macro_bot.profile_targets import (
     questionnaire_meta_payload,
 )
 from macro_bot.storage import UserProfileStore
+from macro_bot.telegram_app import build_telegram_application
 
 load_dotenv()
 
@@ -39,6 +41,10 @@ app = FastAPI()
 
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 BOT_TOKEN = os.getenv("BOT_TOKEN", "")
+MINI_APP_URL = os.getenv("MINI_APP_URL", "").strip()
+TELEGRAM_WEBHOOK_BASE_URL = os.getenv("TELEGRAM_WEBHOOK_BASE_URL", "").strip().rstrip("/")
+TELEGRAM_WEBHOOK_SECRET = os.getenv("TELEGRAM_WEBHOOK_SECRET", "").strip()
+TELEGRAM_WEBHOOK_PATH = os.getenv("TELEGRAM_WEBHOOK_PATH", "/telegram/webhook")
 MODEL = "gpt-5.4"
 RECOMMEND_MODEL = os.getenv("OPENAI_RECOMMEND_MODEL", "gpt-4.1-mini")
 CATALOG_REVIEW_MODEL = os.getenv("OPENAI_CATALOG_REVIEW_MODEL", "gpt-4.1-mini")
@@ -235,6 +241,62 @@ CATALOG_OVERLAP_PROMPT_TEMPLATE = (
 client = OpenAI(api_key=OPENAI_API_KEY) if OPENAI_API_KEY else None
 logger.info("macro_api startup: OPENAI_API_KEY loaded=%s", bool(OPENAI_API_KEY))
 app.mount("/miniapp/static", StaticFiles(directory=MINIAPP_DIR), name="miniapp-static")
+
+
+def _mini_app_base_url() -> str:
+    if TELEGRAM_WEBHOOK_BASE_URL:
+        return TELEGRAM_WEBHOOK_BASE_URL.rstrip("/")
+    if MINI_APP_URL.endswith("/miniapp"):
+        return MINI_APP_URL[: -len("/miniapp")]
+    return MINI_APP_URL.rstrip("/")
+
+
+def _telegram_webhook_url() -> str:
+    base_url = _mini_app_base_url()
+    if not base_url:
+        return ""
+    return f"{base_url}{TELEGRAM_WEBHOOK_PATH}"
+
+
+async def _start_telegram_webhook() -> None:
+    webhook_url = _telegram_webhook_url()
+    if not BOT_TOKEN or not webhook_url:
+        logger.info(
+            "telegram_webhook disabled bot_token=%s webhook_url=%s",
+            bool(BOT_TOKEN),
+            bool(webhook_url),
+        )
+        app.state.telegram_application = None
+        return
+
+    telegram_application = build_telegram_application(create_updater=False)
+    await telegram_application.initialize()
+    await telegram_application.start()
+    await telegram_application.bot.set_webhook(
+        url=webhook_url,
+        secret_token=TELEGRAM_WEBHOOK_SECRET or None,
+    )
+    app.state.telegram_application = telegram_application
+    logger.info("telegram_webhook configured url=%s", webhook_url)
+
+
+async def _stop_telegram_webhook() -> None:
+    telegram_application = getattr(app.state, "telegram_application", None)
+    app.state.telegram_application = None
+    if telegram_application is None:
+        return
+    await telegram_application.stop()
+    await telegram_application.shutdown()
+
+
+@app.on_event("startup")
+async def app_startup() -> None:
+    await _start_telegram_webhook()
+
+
+@app.on_event("shutdown")
+async def app_shutdown() -> None:
+    await _stop_telegram_webhook()
 
 
 def downscale_for_vision(image_bytes: bytes, max_side: int = 768, quality: int = 80) -> bytes:
@@ -1049,6 +1111,27 @@ async def review_catalog_overlaps(payload: Dict[str, Any] = Body(...)) -> Dict[s
                 for item in validated_payload["suggestions"]
             ]
         }
+
+
+@app.post(TELEGRAM_WEBHOOK_PATH)
+async def telegram_webhook(
+    request: Request,
+    x_telegram_bot_api_secret_token: str = Header(default="", alias="X-Telegram-Bot-Api-Secret-Token"),
+) -> Dict[str, Any]:
+    if TELEGRAM_WEBHOOK_SECRET and x_telegram_bot_api_secret_token != TELEGRAM_WEBHOOK_SECRET:
+        raise HTTPException(status_code=401, detail="Invalid Telegram webhook secret")
+
+    telegram_application = getattr(app.state, "telegram_application", None)
+    if telegram_application is None:
+        raise HTTPException(status_code=503, detail="Telegram webhook is not configured")
+
+    payload = await request.json()
+    if not isinstance(payload, dict):
+        raise HTTPException(status_code=400, detail="Invalid Telegram update payload")
+
+    update = Update.de_json(payload, telegram_application.bot)
+    await telegram_application.process_update(update)
+    return {"ok": True}
 
 
 @app.get("/miniapp")

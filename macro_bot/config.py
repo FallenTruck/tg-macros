@@ -44,13 +44,15 @@ def load_bot_config() -> BotConfig:
         raise RuntimeError("BOT_TOKEN not set")
 
     root = Path(__file__).resolve().parent.parent
+    service_port = os.getenv("PORT", "9000")
+    local_api_base_url = os.getenv("LOCAL_API_BASE_URL", f"http://127.0.0.1:{service_port}")
     return BotConfig(
         bot_token=bot_token,
-        macro_api_url=os.getenv("MACRO_API", "http://127.0.0.1:9000/estimate"),
-        macro_recommend_api_url=os.getenv("MACRO_RECOMMEND_API", "http://127.0.0.1:9000/recommend"),
+        macro_api_url=os.getenv("MACRO_API", f"{local_api_base_url}/estimate"),
+        macro_recommend_api_url=os.getenv("MACRO_RECOMMEND_API", f"{local_api_base_url}/recommend"),
         macro_catalog_review_api_url=os.getenv(
             "MACRO_CATALOG_REVIEW_API",
-            "http://127.0.0.1:9000/catalog/review-overlaps",
+            f"{local_api_base_url}/catalog/review-overlaps",
         ),
         mini_app_url=os.getenv("MINI_APP_URL", "https://example.com/miniapp"),
         meals_v2_csv_path=root / "meals_v2.csv",
