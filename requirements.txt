@@ -6,5 +6,4 @@ openai
 pillow
 urllib3
 uvicorn[standard]
-uvicorn[standard]
 pytest
