@@ -203,7 +203,7 @@ class MacroApiTests(unittest.TestCase):
             ],
         }
 
-    def _build_init_data(self, user=None, auth_date=None, bot_token="token"):
+    def _build_init_data(self, user=None, auth_date=None, bot_token="token", signature=""):
         user = user or {
             "id": 349553317,
             "username": "Vaanasaurus",
@@ -215,6 +215,8 @@ class MacroApiTests(unittest.TestCase):
             "query_id": "test-query",
             "user": json.dumps(user, separators=(",", ":")),
         }
+        if signature:
+            payload["signature"] = signature
         data_check_string = "\n".join(
             f"{key}={value}"
             for key, value in sorted(payload.items())
@@ -514,6 +516,19 @@ class MacroApiTests(unittest.TestCase):
 
         self.assertEqual(response.status_code, 401)
         self.assertIn("stale", response.text)
+
+    def test_miniapp_accepts_init_data_with_signature_field(self):
+        init_data = self._build_init_data(signature="base64url-signature")
+
+        with patch.object(macro_api, "BOT_TOKEN", "token"), patch.object(
+            macro_api, "USER_PROFILES_PATH", self.profile_path
+        ):
+            response = self.client.get(
+                "/miniapp/api/profile",
+                headers={"X-Telegram-Init-Data": init_data},
+            )
+
+        self.assertEqual(response.status_code, 200)
 
     def test_start_telegram_webhook_configures_bot_application(self):
         fake_application = _FakeTelegramApplication()
