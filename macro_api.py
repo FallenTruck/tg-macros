@@ -365,7 +365,7 @@ def _require_telegram_user(init_data: str) -> Dict[str, Any]:
         for key, value in sorted(parsed.items())
         if key not in {"hash", "signature"}
     )
-    secret_key = hmac.new(BOT_TOKEN.encode("utf-8"), b"WebAppData", hashlib.sha256).digest()
+    secret_key = hmac.new(b"WebAppData", BOT_TOKEN.encode("utf-8"), hashlib.sha256).digest()
     expected_hash = hmac.new(secret_key, data_check_string.encode("utf-8"), hashlib.sha256).hexdigest()
     if not hmac.compare_digest(received_hash, expected_hash):
         raise HTTPException(status_code=401, detail="Telegram init data signature is invalid")

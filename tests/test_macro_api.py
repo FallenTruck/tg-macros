@@ -219,7 +219,7 @@ class MacroApiTests(unittest.TestCase):
             f"{key}={value}"
             for key, value in sorted(payload.items())
         )
-        secret_key = hmac.new(bot_token.encode("utf-8"), b"WebAppData", hashlib.sha256).digest()
+        secret_key = hmac.new(b"WebAppData", bot_token.encode("utf-8"), hashlib.sha256).digest()
         payload["hash"] = hmac.new(
             secret_key,
             data_check_string.encode("utf-8"),
