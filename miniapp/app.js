@@ -27,9 +27,7 @@ if (tg) {
   tg.expand();
 }
 
-bootstrap().catch((error) => {
-  setStatus(error.message || "Could not load the Mini App.", true);
-});
+bootstrap();
 
 form.addEventListener("input", () => {
   state.preview = null;
@@ -89,6 +87,14 @@ saveButton.addEventListener("click", async () => {
 });
 
 async function bootstrap() {
+  const fallbackMeta = {
+    activity_options: fallbackActivityOptions(),
+    goal_options: fallbackGoalOptions(),
+    activity_guidance:
+      "Choose based on both exercise frequency and overall daily movement, not gym days alone.",
+  };
+  renderMeta(fallbackMeta);
+
   setStatus(
     state.hasAuth
       ? "Loading your saved target..."
@@ -97,31 +103,32 @@ async function bootstrap() {
   );
 
   if (!state.hasAuth) {
-    renderMeta({
-      activity_options: fallbackActivityOptions(),
-      goal_options: fallbackGoalOptions(),
-      activity_guidance:
-        "Choose based on both exercise frequency and overall daily movement, not gym days alone.",
-    });
     return;
   }
 
-  const response = await apiFetch("/miniapp/api/profile");
-  state.meta = response;
-  renderMeta(response);
-  if (response.profile) {
-    renderCurrentProfile(response.profile);
-    hydrateForm(response.profile.questionnaire_answers);
-    if (!response.profile.questionnaire_answers) {
-      setStatus(
-        "A migrated target already exists. Raw questionnaire answers were not available, so the form starts blank.",
-        false
-      );
+  try {
+    const response = await apiFetch("/miniapp/api/profile");
+    state.meta = response;
+    renderMeta(response);
+    if (response.profile) {
+      renderCurrentProfile(response.profile);
+      hydrateForm(response.profile.questionnaire_answers);
+      if (!response.profile.questionnaire_answers) {
+        setStatus(
+          "A migrated target already exists. Raw questionnaire answers were not available, so the form starts blank.",
+          false
+        );
+      } else {
+        setStatus("Saved target loaded. Adjust answers if you want to recalculate.", false);
+      }
     } else {
-      setStatus("Saved target loaded. Adjust answers if you want to recalculate.", false);
+      setStatus("No saved target yet. Fill in the questionnaire to create one.", false);
     }
-  } else {
-    setStatus("No saved target yet. Fill in the questionnaire to create one.", false);
+  } catch (error) {
+    setStatus(
+      error.message || "Could not load your saved target. You can still fill in the questionnaire.",
+      true
+    );
   }
 }
 
