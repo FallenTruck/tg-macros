@@ -84,7 +84,7 @@ class BotHandlers:
         store.set_pending_datetime(user.id, parsed_dt.isoformat(timespec="seconds"))
         await msg.reply_text(f"✅ Meal time set: {raw_text}. Now send the meal photo.")
 
-    async def on_setme(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+    async def on_openapp(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         msg = update.effective_message
         user = update.effective_user
         if msg is None or user is None:

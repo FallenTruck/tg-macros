@@ -58,7 +58,7 @@ def build_telegram_application(
         builder = builder.updater(None)
     app = builder.build()
     app.add_handler(CommandHandler("logmeal", handlers.on_logmeal))
-    app.add_handler(CommandHandler("setme", handlers.on_setme))
+    app.add_handler(CommandHandler("openapp", handlers.on_openapp))
     app.add_handler(CommandHandler("suggestmeal", handlers.on_suggestmeal))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handlers.on_datetime_input))
     app.add_handler(MessageHandler(filters.PHOTO, handlers.on_photo))

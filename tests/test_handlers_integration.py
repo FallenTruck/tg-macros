@@ -151,6 +151,20 @@ class HandlersIntegrationTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("Set up your macro targets in the Mini App first.", args[0])
         self.assertIn(self.config.mini_app_url, args[0])
 
+    async def test_on_openapp_sends_setup_link(self):
+        handlers = BotHandlers(self.config, AsyncMock(), InMemoryRepo(), DummyPlanner())
+        msg = AsyncMock()
+        user = SimpleNamespace(id=999, username="unknownuser")
+        context = SimpleNamespace(bot=AsyncMock(), application=SimpleNamespace(bot_data={}), args=[])
+        update = SimpleNamespace(effective_message=msg, effective_user=user)
+
+        await handlers.on_openapp(update, context)
+
+        args = msg.reply_text.await_args.args
+        kwargs = msg.reply_text.await_args.kwargs
+        self.assertIn("Set up your macro targets in the Mini App first.", args[0])
+        self.assertIsNotNone(kwargs["reply_markup"])
+
 
 if __name__ == "__main__":
     unittest.main()
