@@ -32,6 +32,8 @@ logger = logging.getLogger(__name__)
 
 
 class BotHandlers:
+    _SETUP_START_PARAM = "macro_setup"
+
     def __init__(
         self,
         config: BotConfig,
@@ -90,9 +92,10 @@ class BotHandlers:
         if msg is None or user is None:
             return
 
+        setup_url = await self._profile_setup_url(context)
         await msg.reply_text(
-            self._profile_setup_text(),
-            reply_markup=build_setup_keyboard(self._config.mini_app_url),
+            format_profile_setup_message(setup_url),
+            reply_markup=build_setup_keyboard(setup_url),
         )
 
     async def on_suggestmeal(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -322,12 +325,13 @@ class BotHandlers:
                 telegram_user_id=telegram_user_id
             )
         except KeyError:
+            setup_url = await self._profile_setup_url(context)
             await self._deliver_message(
-                self._profile_setup_text(),
+                format_profile_setup_message(setup_url),
                 context=context,
                 reply_message=reply_message,
                 chat_id=chat_id,
-                reply_markup=build_setup_keyboard(self._config.mini_app_url),
+                reply_markup=build_setup_keyboard(setup_url),
             )
             return
         except Exception as err:
@@ -386,5 +390,22 @@ class BotHandlers:
         if chat_id is not None:
             await context.bot.send_message(chat_id=chat_id, text=text, reply_markup=reply_markup)
 
-    def _profile_setup_text(self) -> str:
-        return format_profile_setup_message(self._config.mini_app_url)
+    async def _profile_setup_url(self, context: ContextTypes.DEFAULT_TYPE) -> str:
+        username = getattr(context.bot, "username", "")
+        if isinstance(username, str):
+            username = username.strip().lstrip("@")
+        else:
+            username = ""
+
+        if not username:
+            try:
+                me = await context.bot.get_me()
+            except Exception:
+                me = None
+            fetched_username = getattr(me, "username", "") if me is not None else ""
+            if isinstance(fetched_username, str):
+                username = fetched_username.strip().lstrip("@")
+
+        if username:
+            return f"https://t.me/{username}?startapp={self._SETUP_START_PARAM}"
+        return self._config.mini_app_url

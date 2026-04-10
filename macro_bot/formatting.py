@@ -104,9 +104,9 @@ def format_recommendation_message(result: RecommendationResult) -> str:
     return "\n".join(lines)
 
 
-def format_profile_setup_message(mini_app_url: str) -> str:
+def format_profile_setup_message(setup_url: str) -> str:
     return (
         "Set up your macro targets in the Mini App first.\n"
-        "Open the bot menu, or use this setup link:\n"
-        f"{mini_app_url}"
+        "Open it in Telegram using the button below, or this link:\n"
+        f"{setup_url}"
     )

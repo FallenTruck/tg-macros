@@ -142,20 +142,24 @@ class HandlersIntegrationTests(unittest.IsolatedAsyncioTestCase):
         msg = AsyncMock()
         user = SimpleNamespace(id=999, username="unknownuser")
         app = SimpleNamespace(bot_data={})
-        context = SimpleNamespace(bot=AsyncMock(), application=app, args=[])
+        bot = AsyncMock()
+        bot.username = "javaanfitnessbot"
+        context = SimpleNamespace(bot=bot, application=app, args=[])
         update = SimpleNamespace(effective_message=msg, effective_user=user)
 
         await handlers.on_suggestmeal(update, context)
 
         args = msg.reply_text.await_args.args
         self.assertIn("Set up your macro targets in the Mini App first.", args[0])
-        self.assertIn(self.config.mini_app_url, args[0])
+        self.assertIn("https://t.me/javaanfitnessbot?startapp=macro_setup", args[0])
 
     async def test_on_openapp_sends_setup_link(self):
         handlers = BotHandlers(self.config, AsyncMock(), InMemoryRepo(), DummyPlanner())
         msg = AsyncMock()
         user = SimpleNamespace(id=999, username="unknownuser")
-        context = SimpleNamespace(bot=AsyncMock(), application=SimpleNamespace(bot_data={}), args=[])
+        bot = AsyncMock()
+        bot.username = "javaanfitnessbot"
+        context = SimpleNamespace(bot=bot, application=SimpleNamespace(bot_data={}), args=[])
         update = SimpleNamespace(effective_message=msg, effective_user=user)
 
         await handlers.on_openapp(update, context)
@@ -163,7 +167,11 @@ class HandlersIntegrationTests(unittest.IsolatedAsyncioTestCase):
         args = msg.reply_text.await_args.args
         kwargs = msg.reply_text.await_args.kwargs
         self.assertIn("Set up your macro targets in the Mini App first.", args[0])
-        self.assertIsNotNone(kwargs["reply_markup"])
+        self.assertIn("https://t.me/javaanfitnessbot?startapp=macro_setup", args[0])
+        self.assertEqual(
+            kwargs["reply_markup"].inline_keyboard[0][0].url,
+            "https://t.me/javaanfitnessbot?startapp=macro_setup",
+        )
 
 
 if __name__ == "__main__":
