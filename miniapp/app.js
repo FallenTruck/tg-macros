@@ -23,6 +23,7 @@ const saveButton = document.querySelector("#save-button");
 const previewPanel = document.querySelector("#preview-panel");
 const previewSubtitle = document.querySelector("#preview-subtitle");
 const previewMacros = document.querySelector("#preview-macros");
+const previewEmpty = document.querySelector("#preview-empty");
 const currentMeta = document.querySelector("#current-meta");
 const currentMacros = document.querySelector("#current-macros");
 const currentEmpty = document.querySelector("#current-empty");
@@ -32,6 +33,9 @@ const openQuestionnaireButton = document.querySelector("#open-questionnaire-butt
 const backHomeButton = document.querySelector("#back-home-button");
 const homeCtaTitle = document.querySelector("#home-cta-title");
 const homeCtaDescription = document.querySelector("#home-cta-description");
+const routeChip = document.querySelector("#route-chip");
+const questionnaireNote = document.querySelector("#questionnaire-note");
+const questionnaireNoteCopy = document.querySelector("#questionnaire-note-copy");
 
 if (tg) {
   tg.ready();
@@ -51,13 +55,14 @@ backHomeButton.addEventListener("click", () => {
 form.addEventListener("input", () => {
   state.preview = null;
   saveButton.disabled = true;
+  renderQuestionnaireContext();
   renderPreview();
 });
 
 form.addEventListener("submit", async (event) => {
   event.preventDefault();
   if (!state.hasAuth) {
-    setStatus("Open this page inside Telegram to preview and save targets.", true);
+    setStatus("Open this page inside Telegram to preview and save targets.", "warning");
     return;
   }
 
@@ -71,9 +76,10 @@ form.addEventListener("submit", async (event) => {
     state.preview = response;
     renderPreview();
     saveButton.disabled = false;
-    setStatus("Preview ready. Review the numbers, then save.", false);
+    setQuestionnaireNote("Preview ready. Review the result, then save if it looks right.", "success");
+    setStatus("", "neutral");
   } catch (error) {
-    setStatus(error.message || "Could not generate a preview.", true);
+    setStatus(error.message || "Could not generate a preview.", "error");
   } finally {
     previewButton.disabled = false;
   }
@@ -81,7 +87,7 @@ form.addEventListener("submit", async (event) => {
 
 saveButton.addEventListener("click", async () => {
   if (!state.hasAuth) {
-    setStatus("Open this page inside Telegram to save targets.", true);
+    setStatus("Open this page inside Telegram to save targets.", "warning");
     return;
   }
 
@@ -96,12 +102,13 @@ saveButton.addEventListener("click", async () => {
     state.preview = response.preview || null;
     renderCurrentProfile(state.profile);
     renderPreview();
-    setStatus("Targets saved. Recommendations will now use this profile.", false);
+    setQuestionnaireNote("Target saved. Recommendations will now use this profile.", "success");
+    setStatus("", "neutral");
     if (tg?.HapticFeedback?.notificationOccurred) {
       tg.HapticFeedback.notificationOccurred("success");
     }
   } catch (error) {
-    setStatus(error.message || "Could not save the profile.", true);
+    setStatus(error.message || "Could not save the profile.", "error");
     saveButton.disabled = false;
   }
 });
@@ -125,10 +132,11 @@ async function bootstrap() {
     state.hasAuth
       ? "Loading your saved target..."
       : "Open this page from Telegram to load or save your target.",
-    !state.hasAuth
+    state.hasAuth ? "info" : "warning"
   );
 
   if (!state.hasAuth) {
+    renderQuestionnaireContext();
     return;
   }
 
@@ -140,22 +148,15 @@ async function bootstrap() {
     renderCurrentProfile(state.profile);
     if (state.profile) {
       hydrateForm(state.profile.questionnaire_answers);
-      if (!state.profile.questionnaire_answers) {
-        setStatus(
-          "A migrated target already exists. Raw questionnaire answers were not available, so the form starts blank.",
-          false
-        );
-      } else {
-        setStatus("Saved target loaded. Adjust answers if you want to recalculate.", false);
-      }
-    } else {
-      setStatus("No saved target yet. Fill in the questionnaire to create one.", false);
     }
+    renderQuestionnaireContext();
+    setStatus("", "neutral");
   } catch (error) {
     setStatus(
       error.message || "Could not load your saved target. You can still fill in the questionnaire.",
-      true
+      "error"
     );
+    renderQuestionnaireContext();
   }
 }
 
@@ -187,6 +188,7 @@ function renderRoute(route) {
   state.activeView = route;
   homeView.hidden = route !== HOME_VIEW;
   questionnaireView.hidden = route !== QUESTIONNAIRE_VIEW;
+  routeChip.textContent = route === HOME_VIEW ? "Home" : "Questionnaire";
   renderPreview();
 }
 
@@ -253,16 +255,22 @@ function renderCurrentProfile(profile) {
 }
 
 function renderPreview() {
-  if (!state.preview || state.activeView !== QUESTIONNAIRE_VIEW) {
+  if (state.activeView !== QUESTIONNAIRE_VIEW) {
     previewPanel.hidden = true;
-    if (!state.preview) {
-      previewSubtitle.textContent = "";
-      previewMacros.innerHTML = "";
-    }
     return;
   }
 
   previewPanel.hidden = false;
+  if (!state.preview) {
+    previewSubtitle.textContent = "Use Preview target to generate the latest calculation.";
+    previewEmpty.hidden = false;
+    previewMacros.hidden = true;
+    previewMacros.innerHTML = "";
+    return;
+  }
+
+  previewEmpty.hidden = true;
+  previewMacros.hidden = false;
   previewSubtitle.textContent = `${state.preview.goal_label} • ${state.preview.activity_label}`;
   previewMacros.innerHTML = macroCards(state.preview.daily_target);
 }
@@ -343,9 +351,46 @@ function macroCard(label, value) {
   `;
 }
 
-function setStatus(message, isError) {
+function renderQuestionnaireContext() {
+  if (!state.hasAuth) {
+    setQuestionnaireNote("Preview and save only work when this page is opened inside Telegram.", "warning");
+    return;
+  }
+
+  if (!state.profile) {
+    setQuestionnaireNote("No saved target yet. Work through the sections below to build one.", "neutral");
+    return;
+  }
+
+  if (!state.profile.questionnaire_answers) {
+    setQuestionnaireNote(
+      "This target came from an older migrated profile. Open the sections below only if you want to rebuild it.",
+      "info"
+    );
+    return;
+  }
+
+  setQuestionnaireNote(
+    "Saved answers loaded. Change any field, preview again, then save to replace the current target.",
+    "neutral"
+  );
+}
+
+function setQuestionnaireNote(message, tone = "neutral") {
+  questionnaireNote.hidden = !message;
+  questionnaireNote.dataset.tone = tone;
+  questionnaireNoteCopy.textContent = message;
+}
+
+function setStatus(message, tone = "neutral") {
+  statusPanel.hidden = !message;
+  if (!message) {
+    statusMessage.textContent = "";
+    statusPanel.dataset.tone = "neutral";
+    return;
+  }
   statusMessage.textContent = message;
-  statusPanel.dataset.tone = isError ? "error" : "neutral";
+  statusPanel.dataset.tone = tone;
 }
 
 function formatIso(value) {
