@@ -1,10 +1,15 @@
 const tg = window.Telegram?.WebApp ?? null;
 const initData = tg?.initData ?? "";
 
+const HOME_VIEW = "home";
+const QUESTIONNAIRE_VIEW = "questionnaire";
+
 const state = {
   meta: null,
+  profile: null,
   preview: null,
   hasAuth: Boolean(initData),
+  activeView: HOME_VIEW,
 };
 
 const form = document.querySelector("#questionnaire-form");
@@ -18,20 +23,35 @@ const saveButton = document.querySelector("#save-button");
 const previewPanel = document.querySelector("#preview-panel");
 const previewSubtitle = document.querySelector("#preview-subtitle");
 const previewMacros = document.querySelector("#preview-macros");
-const currentPanel = document.querySelector("#current-panel");
 const currentMeta = document.querySelector("#current-meta");
 const currentMacros = document.querySelector("#current-macros");
+const currentEmpty = document.querySelector("#current-empty");
+const homeView = document.querySelector("#home-view");
+const questionnaireView = document.querySelector("#questionnaire-view");
+const openQuestionnaireButton = document.querySelector("#open-questionnaire-button");
+const backHomeButton = document.querySelector("#back-home-button");
+const homeCtaTitle = document.querySelector("#home-cta-title");
+const homeCtaDescription = document.querySelector("#home-cta-description");
 
 if (tg) {
   tg.ready();
   tg.expand();
 }
 
-bootstrap();
+window.addEventListener("hashchange", syncRoute);
+
+openQuestionnaireButton.addEventListener("click", () => {
+  navigateTo(QUESTIONNAIRE_VIEW);
+});
+
+backHomeButton.addEventListener("click", () => {
+  navigateTo(HOME_VIEW);
+});
 
 form.addEventListener("input", () => {
   state.preview = null;
   saveButton.disabled = true;
+  renderPreview();
 });
 
 form.addEventListener("submit", async (event) => {
@@ -49,7 +69,7 @@ form.addEventListener("submit", async (event) => {
       body: JSON.stringify(payload),
     });
     state.preview = response;
-    renderPreview(response);
+    renderPreview();
     saveButton.disabled = false;
     setStatus("Preview ready. Review the numbers, then save.", false);
   } catch (error) {
@@ -72,10 +92,10 @@ saveButton.addEventListener("click", async () => {
       method: "POST",
       body: JSON.stringify(payload),
     });
-    renderCurrentProfile(response.profile);
-    if (response.preview) {
-      renderPreview(response.preview);
-    }
+    state.profile = response.profile || null;
+    state.preview = response.preview || null;
+    renderCurrentProfile(state.profile);
+    renderPreview();
     setStatus("Targets saved. Recommendations will now use this profile.", false);
     if (tg?.HapticFeedback?.notificationOccurred) {
       tg.HapticFeedback.notificationOccurred("success");
@@ -86,6 +106,8 @@ saveButton.addEventListener("click", async () => {
   }
 });
 
+bootstrap();
+
 async function bootstrap() {
   const fallbackMeta = {
     activity_options: fallbackActivityOptions(),
@@ -93,7 +115,11 @@ async function bootstrap() {
     activity_guidance:
       "Choose based on both exercise frequency and overall daily movement, not gym days alone.",
   };
+
+  state.meta = fallbackMeta;
   renderMeta(fallbackMeta);
+  renderCurrentProfile(null);
+  syncRoute();
 
   setStatus(
     state.hasAuth
@@ -109,11 +135,12 @@ async function bootstrap() {
   try {
     const response = await apiFetch("/miniapp/api/profile");
     state.meta = response;
+    state.profile = response.profile || null;
     renderMeta(response);
-    if (response.profile) {
-      renderCurrentProfile(response.profile);
-      hydrateForm(response.profile.questionnaire_answers);
-      if (!response.profile.questionnaire_answers) {
+    renderCurrentProfile(state.profile);
+    if (state.profile) {
+      hydrateForm(state.profile.questionnaire_answers);
+      if (!state.profile.questionnaire_answers) {
         setStatus(
           "A migrated target already exists. Raw questionnaire answers were not available, so the form starts blank.",
           false
@@ -130,6 +157,37 @@ async function bootstrap() {
       true
     );
   }
+}
+
+function normalizeRoute(hash = window.location.hash) {
+  const route = String(hash || "").replace(/^#/, "").trim().toLowerCase();
+  return route === QUESTIONNAIRE_VIEW ? QUESTIONNAIRE_VIEW : HOME_VIEW;
+}
+
+function navigateTo(view) {
+  const route = view === QUESTIONNAIRE_VIEW ? QUESTIONNAIRE_VIEW : HOME_VIEW;
+  const targetHash = `#${route}`;
+  if (window.location.hash === targetHash) {
+    renderRoute(route);
+    return;
+  }
+  window.location.hash = targetHash;
+}
+
+function syncRoute() {
+  const route = normalizeRoute();
+  const normalizedHash = `#${route}`;
+  if (window.location.hash !== normalizedHash) {
+    window.history.replaceState(null, "", `${window.location.pathname}${window.location.search}${normalizedHash}`);
+  }
+  renderRoute(route);
+}
+
+function renderRoute(route) {
+  state.activeView = route;
+  homeView.hidden = route !== HOME_VIEW;
+  questionnaireView.hidden = route !== QUESTIONNAIRE_VIEW;
+  renderPreview();
 }
 
 function renderMeta(meta) {
@@ -175,21 +233,38 @@ function renderMeta(meta) {
 
 function renderCurrentProfile(profile) {
   if (!profile) {
-    currentPanel.hidden = true;
+    currentMeta.textContent = "No target saved yet";
+    currentEmpty.hidden = false;
+    currentMacros.hidden = true;
+    currentMacros.innerHTML = "";
+    homeCtaTitle.textContent = "Set up targets";
+    homeCtaDescription.textContent = "Answer a short questionnaire and preview the result before saving.";
     return;
   }
 
-  currentPanel.hidden = false;
   currentMeta.textContent = profile.updated_at
     ? `Saved ${formatIso(profile.updated_at)}`
     : "Saved target";
+  currentEmpty.hidden = true;
+  currentMacros.hidden = false;
   currentMacros.innerHTML = macroCards(profile.daily_target);
+  homeCtaTitle.textContent = "Edit targets";
+  homeCtaDescription.textContent = "Open the questionnaire to update your saved calories and macros.";
 }
 
-function renderPreview(preview) {
+function renderPreview() {
+  if (!state.preview || state.activeView !== QUESTIONNAIRE_VIEW) {
+    previewPanel.hidden = true;
+    if (!state.preview) {
+      previewSubtitle.textContent = "";
+      previewMacros.innerHTML = "";
+    }
+    return;
+  }
+
   previewPanel.hidden = false;
-  previewSubtitle.textContent = `${preview.goal_label} • ${preview.activity_label}`;
-  previewMacros.innerHTML = macroCards(preview.daily_target);
+  previewSubtitle.textContent = `${state.preview.goal_label} • ${state.preview.activity_label}`;
+  previewMacros.innerHTML = macroCards(state.preview.daily_target);
 }
 
 function hydrateForm(answers) {
