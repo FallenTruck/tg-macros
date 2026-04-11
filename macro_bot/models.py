@@ -4,7 +4,7 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Dict, List, Optional
 
-QUESTIONNAIRE_VERSION = "miniapp-v1"
+QUESTIONNAIRE_VERSION = "miniapp-v2"
 QUESTIONNAIRE_SEXES = {"male", "female"}
 QUESTIONNAIRE_GOALS = {"lose", "maintain", "gain"}
 QUESTIONNAIRE_ACTIVITY_LEVELS = {"sedentary", "light", "moderate", "active", "very_active"}

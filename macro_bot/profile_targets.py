@@ -54,6 +54,18 @@ GOAL_CALORIE_ADJUSTMENTS = {
     "gain": 300.0,
 }
 
+GOAL_PROTEIN_PER_KG = {
+    "lose": 1.8,
+    "maintain": 1.6,
+    "gain": 1.6,
+}
+
+GOAL_FAT_PER_KG = {
+    "lose": 0.9,
+    "maintain": 0.9,
+    "gain": 0.9,
+}
+
 
 def derive_daily_target(answers: QuestionnaireAnswers) -> MacroTotal:
     sex_offset = 5.0 if answers.sex == "male" else -161.0
@@ -68,9 +80,8 @@ def derive_daily_target(answers: QuestionnaireAnswers) -> MacroTotal:
         maintenance_calories + GOAL_CALORIE_ADJUSTMENTS[answers.goal]
     )
 
-    protein_per_kg = 2.0 if answers.goal == "lose" else 1.8
-    protein_g = round(answers.weight_kg * protein_per_kg)
-    fat_g = round(answers.weight_kg * 0.8)
+    protein_g = round(answers.weight_kg * GOAL_PROTEIN_PER_KG[answers.goal])
+    fat_g = round(answers.weight_kg * GOAL_FAT_PER_KG[answers.goal])
 
     remaining_calories = target_calories - (protein_g * 4.0) - (fat_g * 9.0)
     carbs_g = max(0, round(remaining_calories / 4.0))

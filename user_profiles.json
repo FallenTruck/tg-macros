@@ -6,13 +6,13 @@
       "display_name": "Vaan",
       "daily_target": {
         "calories": 2200,
-        "protein_g": 160,
-        "carbs_g": 220,
-        "fat_g": 70
+        "protein_g": 140,
+        "carbs_g": 230,
+        "fat_g": 80
       },
       "questionnaire_answers": null,
-      "questionnaire_version": "legacy-migrated",
-      "updated_at": "2026-04-09T10:05:00",
+      "questionnaire_version": "manual-adjusted-v2",
+      "updated_at": "2026-04-11T12:00:00",
       "dietary_preferences": ["high_protein", "mixed_diet"],
       "restrictions": [],
       "preferred_cuisines": ["asian", "western"],
@@ -25,13 +25,13 @@
       "display_name": "Pooja",
       "daily_target": {
         "calories": 1800,
-        "protein_g": 90,
-        "carbs_g": 220,
-        "fat_g": 55
+        "protein_g": 80,
+        "carbs_g": 212.5,
+        "fat_g": 70
       },
       "questionnaire_answers": null,
-      "questionnaire_version": "legacy-migrated",
-      "updated_at": "2026-04-09T10:05:00",
+      "questionnaire_version": "manual-adjusted-v2",
+      "updated_at": "2026-04-11T12:00:00",
       "dietary_preferences": ["vegetarian", "indian"],
       "restrictions": ["vegetarian"],
       "preferred_cuisines": ["indian", "vegetarian"],
