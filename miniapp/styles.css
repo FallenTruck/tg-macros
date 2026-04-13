@@ -47,6 +47,7 @@ input,
 select,
 .choice-card,
 .goal-chip,
+.action-link,
 .nav-item,
 .macro-card,
 .mini-macro-card {
@@ -199,34 +200,35 @@ label,
   margin-top: 10px;
 }
 
-.welcome-orb {
+.welcome-badge {
   position: relative;
   width: 110px;
   height: 110px;
   flex-shrink: 0;
+  pointer-events: none;
 }
 
-.welcome-orb-ring,
-.welcome-orb-core {
+.welcome-badge-ring,
+.welcome-badge-core {
   position: absolute;
   inset: 0;
   border-radius: 50%;
 }
 
-.welcome-orb-ring {
+.welcome-badge-ring {
   border: 1px solid rgba(46, 105, 209, 0.18);
   background:
     radial-gradient(circle at 30% 25%, rgba(46, 105, 209, 0.2), transparent 48%),
     radial-gradient(circle at 72% 75%, rgba(197, 96, 46, 0.18), transparent 42%);
 }
 
-.welcome-orb-core {
-  inset: 18px;
+.welcome-badge-core {
+  inset: 16px;
   display: grid;
   place-items: center;
   background: linear-gradient(135deg, var(--blue), #5c88df);
   color: #fff8f2;
-  font-size: 2rem;
+  font-size: 2.2rem;
   box-shadow: 0 18px 26px rgba(46, 105, 209, 0.22);
 }
 
@@ -580,6 +582,9 @@ button {
   border: 0;
   cursor: pointer;
   transition: transform 160ms ease, opacity 160ms ease, box-shadow 160ms ease;
+  appearance: none;
+  -webkit-appearance: none;
+  touch-action: manipulation;
 }
 
 button:hover:not(:disabled) {
@@ -598,10 +603,33 @@ button:disabled {
   border-radius: 999px;
 }
 
+.action-link,
+.nav-item,
+.ghost-button {
+  text-decoration: none;
+}
+
+.action-link,
+.primary,
+.secondary,
+.ghost-button,
+.nav-item {
+  appearance: none;
+  -webkit-appearance: none;
+  touch-action: manipulation;
+}
+
 .primary {
   background: linear-gradient(135deg, var(--blue), #5d8ae4);
   color: #fff9f2;
   box-shadow: 0 14px 24px rgba(46, 105, 209, 0.22);
+}
+
+.action-link.primary,
+.action-link.secondary {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
 }
 
 .secondary {
@@ -650,6 +678,9 @@ button:disabled {
   border-radius: 18px;
   background: transparent;
   color: var(--muted);
+  position: relative;
+  z-index: 2;
+  pointer-events: auto;
 }
 
 .nav-item svg {
@@ -671,7 +702,7 @@ button:disabled {
     display: block;
   }
 
-  .welcome-orb {
+  .welcome-badge {
     margin-top: 20px;
   }
 
@@ -717,6 +748,11 @@ button:disabled {
 
   .welcome-copy h2 {
     font-size: clamp(1.9rem, 9vw, 2.7rem);
+  }
+
+  .section-label {
+    font-size: 0.68rem;
+    letter-spacing: 0.09em;
   }
 
   .bottom-nav {

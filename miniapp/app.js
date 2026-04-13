@@ -33,6 +33,7 @@ const questionnaireView = document.querySelector("#questionnaire-view");
 
 const welcomeTitle = document.querySelector("#welcome-title");
 const welcomeHandle = document.querySelector("#welcome-handle");
+const welcomeAvatar = document.querySelector("#welcome-avatar");
 const homeSummaryTitle = document.querySelector("#home-summary-title");
 const homeSummaryMeta = document.querySelector("#home-summary-meta");
 const homeSummaryEmpty = document.querySelector("#home-summary-empty");
@@ -60,25 +61,6 @@ if (tg) {
 }
 
 window.addEventListener("hashchange", syncRoute);
-
-openProfileButton.addEventListener("click", () => {
-  navigateTo(PROFILE_VIEW);
-});
-
-profileEditButton.addEventListener("click", () => {
-  navigateTo(QUESTIONNAIRE_VIEW);
-});
-
-backProfileButton.addEventListener("click", () => {
-  navigateTo(PROFILE_VIEW);
-});
-
-for (const button of navButtons) {
-  button.addEventListener("click", () => {
-    const route = button.dataset.route === PROFILE_VIEW ? PROFILE_VIEW : HOME_VIEW;
-    navigateTo(route);
-  });
-}
 
 form.addEventListener("input", () => {
   state.preview = null;
@@ -301,6 +283,7 @@ function renderViewer() {
 
   welcomeTitle.textContent = primary === "there" ? "Hello there" : `Hello ${primary}`;
   welcomeHandle.textContent = secondary;
+  welcomeAvatar.textContent = viewerInitialValue(viewer);
 
   viewerInitial.textContent = viewerInitialValue(viewer);
   profileViewerTitle.textContent = primary === "there" ? "Profile" : primary;

@@ -27,7 +27,7 @@
         <section class="app-view" id="home-view" data-view="home">
           <section class="panel welcome-panel">
             <div class="welcome-copy">
-              <p class="section-label">Home</p>
+              <p class="section-label">Dashboard</p>
               <h2 id="welcome-title">Hello there</h2>
               <p class="lead-copy" id="welcome-subtitle">
                 Set up and manage your nutrition targets here.
@@ -36,9 +36,9 @@
                 Open this Mini App from Telegram to load your identity.
               </p>
             </div>
-            <div class="welcome-orb">
-              <span class="welcome-orb-ring"></span>
-              <span class="welcome-orb-core">+</span>
+            <div class="welcome-badge" aria-hidden="true">
+              <span class="welcome-badge-ring"></span>
+              <span class="welcome-badge-core" id="welcome-avatar">JF</span>
             </div>
           </section>
 
@@ -56,9 +56,9 @@
             </div>
             <div class="mini-macro-grid" id="home-summary-macros" hidden></div>
 
-            <button type="button" class="primary summary-cta" id="open-profile-button">
+            <a href="#profile" class="primary summary-cta action-link" id="open-profile-button">
               Set Up Targets
-            </button>
+            </a>
           </section>
         </section>
 
@@ -86,16 +86,16 @@
             </div>
             <div class="macro-grid" id="profile-macros" hidden></div>
 
-            <button type="button" class="primary summary-cta" id="profile-edit-button">
+            <a href="#questionnaire" class="primary summary-cta action-link" id="profile-edit-button">
               Set Up Targets
-            </button>
+            </a>
           </section>
         </section>
 
         <section class="app-view" id="questionnaire-view" data-view="questionnaire" hidden>
           <section class="panel questionnaire-shell">
             <div class="questionnaire-topbar">
-              <button type="button" class="ghost-button" id="back-profile-button">← Profile</button>
+              <a href="#profile" class="ghost-button action-link" id="back-profile-button">← Profile</a>
               <div class="questionnaire-heading">
                 <p class="section-label">Questionnaire</p>
                 <h2>Recalculate your daily target</h2>
@@ -232,22 +232,22 @@
     </main>
 
     <nav class="bottom-nav" aria-label="Primary">
-      <button type="button" class="nav-item" id="nav-home" data-route="home">
+      <a href="#home" class="nav-item" id="nav-home" data-route="home">
         <svg viewBox="0 0 24 24" aria-hidden="true">
           <path
             d="M4 10.5 12 4l8 6.5v8.25a1.25 1.25 0 0 1-1.25 1.25h-4.5v-5h-4.5v5h-4.5A1.25 1.25 0 0 1 4 18.75Z"
           />
         </svg>
         <span>Home</span>
-      </button>
-      <button type="button" class="nav-item" id="nav-profile" data-route="profile">
+      </a>
+      <a href="#profile" class="nav-item" id="nav-profile" data-route="profile">
         <svg viewBox="0 0 24 24" aria-hidden="true">
           <path
             d="M12 12a4.25 4.25 0 1 0-4.25-4.25A4.25 4.25 0 0 0 12 12Zm0 2c-4.14 0-7.5 2.57-7.5 5.75 0 .69.56 1.25 1.25 1.25h12.5c.69 0 1.25-.56 1.25-1.25C19.5 16.57 16.14 14 12 14Z"
           />
         </svg>
         <span>Profile</span>
-      </button>
+      </a>
     </nav>
 
     <script type="module" src="/miniapp/static/app.js"></script>
