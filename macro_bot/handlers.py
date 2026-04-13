@@ -32,8 +32,6 @@ logger = logging.getLogger(__name__)
 
 
 class BotHandlers:
-    _SETUP_START_PARAM = "macro_setup"
-
     def __init__(
         self,
         config: BotConfig,
@@ -407,5 +405,5 @@ class BotHandlers:
                 username = fetched_username.strip().lstrip("@")
 
         if username:
-            return f"https://t.me/{username}?startapp={self._SETUP_START_PARAM}"
+            return f"https://t.me/{username}?startapp"
         return self._config.mini_app_url

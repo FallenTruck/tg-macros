@@ -23,7 +23,7 @@ def build_meal_keyboard(token: str) -> InlineKeyboardMarkup:
 
 def build_setup_keyboard(url: str) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(
-        [[InlineKeyboardButton("Open Macro Setup", url=url)]]
+        [[InlineKeyboardButton("Open Nutrition Workspace", url=url)]]
     )
 
 
@@ -106,7 +106,7 @@ def format_recommendation_message(result: RecommendationResult) -> str:
 
 def format_profile_setup_message(setup_url: str) -> str:
     return (
-        "Set up your macro targets in the Mini App first.\n"
+        "Open the Mini App in Telegram first.\n"
         "Open it in Telegram using the button below, or this link:\n"
         f"{setup_url}"
     )
