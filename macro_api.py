@@ -407,10 +407,19 @@ def _questionnaire_preview_payload(answers: QuestionnaireAnswers) -> Dict[str, A
     }
 
 
-def _profile_response_payload(profile: Optional[UserProfile]) -> Dict[str, Any]:
+def _viewer_payload(auth_user: Dict[str, Any]) -> Dict[str, Any]:
+    return {
+        "telegram_user_id": int(auth_user["telegram_user_id"]),
+        "username": str(auth_user.get("username", "") or ""),
+        "display_name": str(auth_user.get("display_name", "") or ""),
+    }
+
+
+def _profile_response_payload(profile: Optional[UserProfile], viewer: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
     payload = {
         "profile": profile.to_payload() if profile is not None else None,
         "questionnaire_version": QUESTIONNAIRE_VERSION,
+        "viewer": viewer,
     }
     payload.update(questionnaire_meta_payload())
     return payload
@@ -1149,7 +1158,7 @@ async def miniapp_profile(
         profile = store.get(auth_user["telegram_user_id"])
     except KeyError:
         profile = None
-    return _profile_response_payload(profile)
+    return _profile_response_payload(profile, viewer=_viewer_payload(auth_user))
 
 
 @app.post("/miniapp/api/targets/preview")
@@ -1197,6 +1206,6 @@ async def save_miniapp_profile(
         preferred_tags=list(existing.preferred_tags) if existing is not None else [],
     )
     store.upsert(profile)
-    response_payload = _profile_response_payload(profile)
+    response_payload = _profile_response_payload(profile, viewer=_viewer_payload(auth_user))
     response_payload["preview"] = _questionnaire_preview_payload(answers)
     return response_payload

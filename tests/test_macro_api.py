@@ -480,6 +480,9 @@ class MacroApiTests(unittest.TestCase):
             )
             self.assertEqual(save_response.status_code, 200)
             save_body = save_response.json()
+            self.assertEqual(save_body["viewer"]["telegram_user_id"], 349553317)
+            self.assertEqual(save_body["viewer"]["username"], "Vaanasaurus")
+            self.assertEqual(save_body["viewer"]["display_name"], "Vaan")
             self.assertEqual(save_body["profile"]["telegram_user_id"], 349553317)
             self.assertEqual(
                 save_body["profile"]["questionnaire_answers"]["activity_level"],
@@ -499,6 +502,8 @@ class MacroApiTests(unittest.TestCase):
             )
             self.assertEqual(profile_response.status_code, 200)
             profile_body = profile_response.json()
+            self.assertEqual(profile_body["viewer"]["username"], "Vaanasaurus")
+            self.assertEqual(profile_body["viewer"]["display_name"], "Vaan")
             self.assertEqual(profile_body["profile"]["display_name"], "Vaan")
             self.assertTrue(profile_body["activity_options"])
 

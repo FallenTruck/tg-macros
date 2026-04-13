@@ -9,7 +9,7 @@
   </head>
   <body>
     <main class="page-shell">
-      <section class="app-chrome">
+      <header class="app-bar">
         <div class="brand-cluster">
           <div class="brand-mark">JF</div>
           <div class="brand-copy">
@@ -17,11 +17,7 @@
             <h1 class="app-title">Nutrition Workspace</h1>
           </div>
         </div>
-        <div class="app-chip-row">
-          <span class="app-chip app-chip-muted">Mini App</span>
-          <span class="app-chip" id="route-chip">Home</span>
-        </div>
-      </section>
+      </header>
 
       <section class="panel status-panel" id="status-panel" hidden>
         <p id="status-message"></p>
@@ -29,76 +25,77 @@
 
       <section class="view-stack">
         <section class="app-view" id="home-view" data-view="home">
-          <section class="panel workspace-panel">
-            <div class="workspace-grid">
-              <div class="workspace-copy">
-                <p class="section-label">Daily targets</p>
-                <h2>Open the setup flow when training, activity, or goals change.</h2>
-                <p class="lead-copy">
-                  This Mini App is the control room for your saved calories and macros.
-                  Review the current target, then reopen the questionnaire whenever you
-                  want a fresh calculation.
-                </p>
-
-                <button type="button" class="launch-card" id="open-questionnaire-button">
-                  <span class="launch-card-copy">
-                    <strong id="home-cta-title">Set up targets</strong>
-                    <span id="home-cta-description">
-                      Answer a short questionnaire and preview the result before saving.
-                    </span>
-                  </span>
-                  <span class="launch-card-arrow" aria-hidden="true">→</span>
-                </button>
-
-                <div class="workflow-strip">
-                  <article class="workflow-card">
-                    <span class="workflow-index">01</span>
-                    <div>
-                      <strong>Review</strong>
-                      <p>Start from the saved target on the right.</p>
-                    </div>
-                  </article>
-                  <article class="workflow-card">
-                    <span class="workflow-index">02</span>
-                    <div>
-                      <strong>Recalculate</strong>
-                      <p>Open the questionnaire when your inputs change.</p>
-                    </div>
-                  </article>
-                  <article class="workflow-card">
-                    <span class="workflow-index">03</span>
-                    <div>
-                      <strong>Save</strong>
-                      <p>Lock in the preview to update recommendations.</p>
-                    </div>
-                  </article>
-                </div>
-              </div>
-
-              <aside class="target-snapshot" id="current-panel">
-                <div class="snapshot-head">
-                  <div>
-                    <p class="section-label">Current target</p>
-                    <h3>Saved profile</h3>
-                  </div>
-                  <p id="current-meta">No target saved yet</p>
-                </div>
-
-                <div class="current-empty" id="current-empty">
-                  No target saved yet. Open the questionnaire to create your first
-                  calories and macro target.
-                </div>
-
-                <div class="macro-grid" id="current-macros" hidden></div>
-              </aside>
+          <section class="panel welcome-panel">
+            <div class="welcome-copy">
+              <p class="section-label">Home</p>
+              <h2 id="welcome-title">Hello there</h2>
+              <p class="lead-copy" id="welcome-subtitle">
+                Set up and manage your nutrition targets here.
+              </p>
+              <p class="welcome-handle" id="welcome-handle">
+                Open this Mini App from Telegram to load your identity.
+              </p>
             </div>
+            <div class="welcome-orb">
+              <span class="welcome-orb-ring"></span>
+              <span class="welcome-orb-core">+</span>
+            </div>
+          </section>
+
+          <section class="panel home-summary-panel">
+            <div class="panel-head">
+              <div>
+                <p class="section-label">Quick summary</p>
+                <h3 id="home-summary-title">No target saved yet</h3>
+              </div>
+              <p id="home-summary-meta">Profile setup lives under Profile.</p>
+            </div>
+
+            <div class="summary-empty" id="home-summary-empty">
+              Open Profile to create your first saved calorie and macro target.
+            </div>
+            <div class="mini-macro-grid" id="home-summary-macros" hidden></div>
+
+            <button type="button" class="primary summary-cta" id="open-profile-button">
+              Set Up Targets
+            </button>
+          </section>
+        </section>
+
+        <section class="app-view" id="profile-view" data-view="profile" hidden>
+          <section class="panel profile-panel">
+            <div class="profile-identity">
+              <div class="identity-badge" id="viewer-initial">J</div>
+              <div class="identity-copy">
+                <p class="section-label">Profile</p>
+                <h2 id="profile-viewer-title">@username</h2>
+                <p id="profile-viewer-subtitle">Manage your saved target here.</p>
+              </div>
+            </div>
+
+            <div class="panel-head profile-head">
+              <div>
+                <p class="section-label">Current macros</p>
+                <h3 id="profile-summary-title">No target saved yet</h3>
+              </div>
+              <p id="profile-meta">No target saved yet</p>
+            </div>
+
+            <div class="summary-empty" id="profile-empty">
+              No target saved yet. Open the questionnaire to calculate and save one.
+            </div>
+            <div class="macro-grid" id="profile-macros" hidden></div>
+
+            <button type="button" class="primary summary-cta" id="profile-edit-button">
+              Set Up Targets
+            </button>
           </section>
         </section>
 
         <section class="app-view" id="questionnaire-view" data-view="questionnaire" hidden>
           <section class="panel questionnaire-shell">
             <div class="questionnaire-topbar">
-              <button type="button" class="ghost-button" id="back-home-button">← Home</button>
+              <button type="button" class="ghost-button" id="back-profile-button">← Profile</button>
               <div class="questionnaire-heading">
                 <p class="section-label">Questionnaire</p>
                 <h2>Recalculate your daily target</h2>
@@ -233,6 +230,25 @@
         </section>
       </section>
     </main>
+
+    <nav class="bottom-nav" aria-label="Primary">
+      <button type="button" class="nav-item" id="nav-home" data-route="home">
+        <svg viewBox="0 0 24 24" aria-hidden="true">
+          <path
+            d="M4 10.5 12 4l8 6.5v8.25a1.25 1.25 0 0 1-1.25 1.25h-4.5v-5h-4.5v5h-4.5A1.25 1.25 0 0 1 4 18.75Z"
+          />
+        </svg>
+        <span>Home</span>
+      </button>
+      <button type="button" class="nav-item" id="nav-profile" data-route="profile">
+        <svg viewBox="0 0 24 24" aria-hidden="true">
+          <path
+            d="M12 12a4.25 4.25 0 1 0-4.25-4.25A4.25 4.25 0 0 0 12 12Zm0 2c-4.14 0-7.5 2.57-7.5 5.75 0 .69.56 1.25 1.25 1.25h12.5c.69 0 1.25-.56 1.25-1.25C19.5 16.57 16.14 14 12 14Z"
+          />
+        </svg>
+        <span>Profile</span>
+      </button>
+    </nav>
 
     <script type="module" src="/miniapp/static/app.js"></script>
   </body>

@@ -2,12 +2,14 @@ const tg = window.Telegram?.WebApp ?? null;
 const initData = tg?.initData ?? "";
 
 const HOME_VIEW = "home";
+const PROFILE_VIEW = "profile";
 const QUESTIONNAIRE_VIEW = "questionnaire";
 
 const state = {
   meta: null,
   profile: null,
   preview: null,
+  viewer: buildViewerFromTelegram(tg?.initDataUnsafe?.user ?? null),
   hasAuth: Boolean(initData),
   activeView: HOME_VIEW,
 };
@@ -24,18 +26,33 @@ const previewPanel = document.querySelector("#preview-panel");
 const previewSubtitle = document.querySelector("#preview-subtitle");
 const previewMacros = document.querySelector("#preview-macros");
 const previewEmpty = document.querySelector("#preview-empty");
-const currentMeta = document.querySelector("#current-meta");
-const currentMacros = document.querySelector("#current-macros");
-const currentEmpty = document.querySelector("#current-empty");
+
 const homeView = document.querySelector("#home-view");
+const profileView = document.querySelector("#profile-view");
 const questionnaireView = document.querySelector("#questionnaire-view");
-const openQuestionnaireButton = document.querySelector("#open-questionnaire-button");
-const backHomeButton = document.querySelector("#back-home-button");
-const homeCtaTitle = document.querySelector("#home-cta-title");
-const homeCtaDescription = document.querySelector("#home-cta-description");
-const routeChip = document.querySelector("#route-chip");
+
+const welcomeTitle = document.querySelector("#welcome-title");
+const welcomeHandle = document.querySelector("#welcome-handle");
+const homeSummaryTitle = document.querySelector("#home-summary-title");
+const homeSummaryMeta = document.querySelector("#home-summary-meta");
+const homeSummaryEmpty = document.querySelector("#home-summary-empty");
+const homeSummaryMacros = document.querySelector("#home-summary-macros");
+const openProfileButton = document.querySelector("#open-profile-button");
+
+const viewerInitial = document.querySelector("#viewer-initial");
+const profileViewerTitle = document.querySelector("#profile-viewer-title");
+const profileViewerSubtitle = document.querySelector("#profile-viewer-subtitle");
+const profileSummaryTitle = document.querySelector("#profile-summary-title");
+const profileMeta = document.querySelector("#profile-meta");
+const profileEmpty = document.querySelector("#profile-empty");
+const profileMacros = document.querySelector("#profile-macros");
+const profileEditButton = document.querySelector("#profile-edit-button");
+const backProfileButton = document.querySelector("#back-profile-button");
+
 const questionnaireNote = document.querySelector("#questionnaire-note");
 const questionnaireNoteCopy = document.querySelector("#questionnaire-note-copy");
+
+const navButtons = Array.from(document.querySelectorAll(".nav-item"));
 
 if (tg) {
   tg.ready();
@@ -44,13 +61,24 @@ if (tg) {
 
 window.addEventListener("hashchange", syncRoute);
 
-openQuestionnaireButton.addEventListener("click", () => {
+openProfileButton.addEventListener("click", () => {
+  navigateTo(PROFILE_VIEW);
+});
+
+profileEditButton.addEventListener("click", () => {
   navigateTo(QUESTIONNAIRE_VIEW);
 });
 
-backHomeButton.addEventListener("click", () => {
-  navigateTo(HOME_VIEW);
+backProfileButton.addEventListener("click", () => {
+  navigateTo(PROFILE_VIEW);
 });
+
+for (const button of navButtons) {
+  button.addEventListener("click", () => {
+    const route = button.dataset.route === PROFILE_VIEW ? PROFILE_VIEW : HOME_VIEW;
+    navigateTo(route);
+  });
+}
 
 form.addEventListener("input", () => {
   state.preview = null;
@@ -74,10 +102,10 @@ form.addEventListener("submit", async (event) => {
       body: JSON.stringify(payload),
     });
     state.preview = response;
-    renderPreview();
     saveButton.disabled = false;
     setQuestionnaireNote("Preview ready. Review the result, then save if it looks right.", "success");
     setStatus("", "neutral");
+    renderPreview();
   } catch (error) {
     setStatus(error.message || "Could not generate a preview.", "error");
   } finally {
@@ -99,8 +127,12 @@ saveButton.addEventListener("click", async () => {
       body: JSON.stringify(payload),
     });
     state.profile = response.profile || null;
+    state.viewer = normalizeViewer(response.viewer, state.viewer);
     state.preview = response.preview || null;
-    renderCurrentProfile(state.profile);
+    renderViewer();
+    renderHomeSummary();
+    renderProfileSummary();
+    renderQuestionnaireContext();
     renderPreview();
     setQuestionnaireNote("Target saved. Recommendations will now use this profile.", "success");
     setStatus("", "neutral");
@@ -125,7 +157,9 @@ async function bootstrap() {
 
   state.meta = fallbackMeta;
   renderMeta(fallbackMeta);
-  renderCurrentProfile(null);
+  renderViewer();
+  renderHomeSummary();
+  renderProfileSummary();
   syncRoute();
 
   setStatus(
@@ -144,9 +178,12 @@ async function bootstrap() {
     const response = await apiFetch("/miniapp/api/profile");
     state.meta = response;
     state.profile = response.profile || null;
+    state.viewer = normalizeViewer(response.viewer, state.viewer);
     renderMeta(response);
-    renderCurrentProfile(state.profile);
-    if (state.profile) {
+    renderViewer();
+    renderHomeSummary();
+    renderProfileSummary();
+    if (state.profile?.questionnaire_answers) {
       hydrateForm(state.profile.questionnaire_answers);
     }
     renderQuestionnaireContext();
@@ -160,13 +197,68 @@ async function bootstrap() {
   }
 }
 
+function buildViewerFromTelegram(user) {
+  if (!user || typeof user !== "object") {
+    return { telegram_user_id: 0, username: "", display_name: "" };
+  }
+  const username = String(user.username || "").trim();
+  const firstName = String(user.first_name || "").trim();
+  const lastName = String(user.last_name || "").trim();
+  const displayName = [firstName, lastName].filter(Boolean).join(" ").trim() || username;
+  return {
+    telegram_user_id: Number(user.id || 0),
+    username,
+    display_name: displayName,
+  };
+}
+
+function normalizeViewer(viewer, fallback = null) {
+  const source = viewer && typeof viewer === "object" ? viewer : fallback || {};
+  return {
+    telegram_user_id: Number(source.telegram_user_id || 0),
+    username: String(source.username || "").trim(),
+    display_name: String(source.display_name || "").trim(),
+  };
+}
+
+function viewerPrimaryLabel(viewer) {
+  if (viewer.username) {
+    return `@${viewer.username}`;
+  }
+  if (viewer.display_name) {
+    return viewer.display_name;
+  }
+  return "there";
+}
+
+function viewerSecondaryLabel(viewer) {
+  if (viewer.username && viewer.display_name && viewer.display_name !== viewer.username) {
+    return viewer.display_name;
+  }
+  if (viewer.username) {
+    return "Telegram profile connected";
+  }
+  if (viewer.display_name) {
+    return "Telegram display name loaded";
+  }
+  return "Open this Mini App from Telegram to load your identity.";
+}
+
+function viewerInitialValue(viewer) {
+  const raw = viewer.display_name || viewer.username || "J";
+  return raw.slice(0, 1).toUpperCase();
+}
+
 function normalizeRoute(hash = window.location.hash) {
   const route = String(hash || "").replace(/^#/, "").trim().toLowerCase();
-  return route === QUESTIONNAIRE_VIEW ? QUESTIONNAIRE_VIEW : HOME_VIEW;
+  if (route === PROFILE_VIEW || route === QUESTIONNAIRE_VIEW) {
+    return route;
+  }
+  return HOME_VIEW;
 }
 
 function navigateTo(view) {
-  const route = view === QUESTIONNAIRE_VIEW ? QUESTIONNAIRE_VIEW : HOME_VIEW;
+  const route = view === QUESTIONNAIRE_VIEW || view === PROFILE_VIEW ? view : HOME_VIEW;
   const targetHash = `#${route}`;
   if (window.location.hash === targetHash) {
     renderRoute(route);
@@ -187,9 +279,76 @@ function syncRoute() {
 function renderRoute(route) {
   state.activeView = route;
   homeView.hidden = route !== HOME_VIEW;
+  profileView.hidden = route !== PROFILE_VIEW;
   questionnaireView.hidden = route !== QUESTIONNAIRE_VIEW;
-  routeChip.textContent = route === HOME_VIEW ? "Home" : "Questionnaire";
+
+  for (const button of navButtons) {
+    const buttonRoute = button.dataset.route === PROFILE_VIEW ? PROFILE_VIEW : HOME_VIEW;
+    const isActive = buttonRoute === HOME_VIEW
+      ? route === HOME_VIEW
+      : route === PROFILE_VIEW || route === QUESTIONNAIRE_VIEW;
+    button.classList.toggle("is-active", isActive);
+    button.setAttribute("aria-current", isActive ? "page" : "false");
+  }
+
   renderPreview();
+}
+
+function renderViewer() {
+  const viewer = normalizeViewer(state.viewer);
+  const primary = viewerPrimaryLabel(viewer);
+  const secondary = viewerSecondaryLabel(viewer);
+
+  welcomeTitle.textContent = primary === "there" ? "Hello there" : `Hello ${primary}`;
+  welcomeHandle.textContent = secondary;
+
+  viewerInitial.textContent = viewerInitialValue(viewer);
+  profileViewerTitle.textContent = primary === "there" ? "Profile" : primary;
+  profileViewerSubtitle.textContent = secondary === "Open this Mini App from Telegram to load your identity."
+    ? "Manage your saved target here."
+    : secondary;
+}
+
+function renderHomeSummary() {
+  if (!state.profile) {
+    homeSummaryTitle.textContent = "No target saved yet";
+    homeSummaryMeta.textContent = "Profile setup lives under Profile.";
+    homeSummaryEmpty.hidden = false;
+    homeSummaryMacros.hidden = true;
+    homeSummaryMacros.innerHTML = "";
+    openProfileButton.textContent = "Set Up Targets";
+    return;
+  }
+
+  homeSummaryTitle.textContent = `${Math.round(state.profile.daily_target.calories)} kcal target`;
+  homeSummaryMeta.textContent = state.profile.updated_at
+    ? `Saved ${formatIso(state.profile.updated_at)}`
+    : "Saved target";
+  homeSummaryEmpty.hidden = true;
+  homeSummaryMacros.hidden = false;
+  homeSummaryMacros.innerHTML = compactMacroCards(state.profile.daily_target);
+  openProfileButton.textContent = "View Profile";
+}
+
+function renderProfileSummary() {
+  if (!state.profile) {
+    profileSummaryTitle.textContent = "No target saved yet";
+    profileMeta.textContent = "Complete the questionnaire to create one.";
+    profileEmpty.hidden = false;
+    profileMacros.hidden = true;
+    profileMacros.innerHTML = "";
+    profileEditButton.textContent = "Set Up Targets";
+    return;
+  }
+
+  profileSummaryTitle.textContent = "Saved macro target";
+  profileMeta.textContent = state.profile.updated_at
+    ? `Updated ${formatIso(state.profile.updated_at)}`
+    : "Saved target";
+  profileEmpty.hidden = true;
+  profileMacros.hidden = false;
+  profileMacros.innerHTML = macroCards(state.profile.daily_target);
+  profileEditButton.textContent = "Edit Targets";
 }
 
 function renderMeta(meta) {
@@ -233,27 +392,6 @@ function renderMeta(meta) {
     .join("");
 }
 
-function renderCurrentProfile(profile) {
-  if (!profile) {
-    currentMeta.textContent = "No target saved yet";
-    currentEmpty.hidden = false;
-    currentMacros.hidden = true;
-    currentMacros.innerHTML = "";
-    homeCtaTitle.textContent = "Set up targets";
-    homeCtaDescription.textContent = "Answer a short questionnaire and preview the result before saving.";
-    return;
-  }
-
-  currentMeta.textContent = profile.updated_at
-    ? `Saved ${formatIso(profile.updated_at)}`
-    : "Saved target";
-  currentEmpty.hidden = true;
-  currentMacros.hidden = false;
-  currentMacros.innerHTML = macroCards(profile.daily_target);
-  homeCtaTitle.textContent = "Edit targets";
-  homeCtaDescription.textContent = "Open the questionnaire to update your saved calories and macros.";
-}
-
 function renderPreview() {
   if (state.activeView !== QUESTIONNAIRE_VIEW) {
     previewPanel.hidden = true;
@@ -273,6 +411,31 @@ function renderPreview() {
   previewMacros.hidden = false;
   previewSubtitle.textContent = `${state.preview.goal_label} • ${state.preview.activity_label}`;
   previewMacros.innerHTML = macroCards(state.preview.daily_target);
+}
+
+function renderQuestionnaireContext() {
+  if (!state.hasAuth) {
+    setQuestionnaireNote("Preview and save only work when this page is opened inside Telegram.", "warning");
+    return;
+  }
+
+  if (!state.profile) {
+    setQuestionnaireNote("No saved target yet. Work through the sections below to build one.", "neutral");
+    return;
+  }
+
+  if (!state.profile.questionnaire_answers) {
+    setQuestionnaireNote(
+      "This target came from an older migrated profile. Open the sections below only if you want to rebuild it.",
+      "info"
+    );
+    return;
+  }
+
+  setQuestionnaireNote(
+    "Saved answers loaded. Change any field, preview again, then save to replace the current target.",
+    "neutral"
+  );
 }
 
 function hydrateForm(answers) {
@@ -333,6 +496,24 @@ async function apiFetch(url, options = {}) {
   return response.json();
 }
 
+function compactMacroCards(target) {
+  return `
+    ${compactMacroCard("Calories", `${Math.round(target.calories)} kcal`)}
+    ${compactMacroCard("Protein", `${target.protein_g.toFixed(0)} g`)}
+    ${compactMacroCard("Carbs", `${target.carbs_g.toFixed(0)} g`)}
+    ${compactMacroCard("Fat", `${target.fat_g.toFixed(0)} g`)}
+  `;
+}
+
+function compactMacroCard(label, value) {
+  return `
+    <article class="mini-macro-card">
+      <span class="mini-macro-label">${escapeHtml(label)}</span>
+      <strong class="mini-macro-value">${escapeHtml(value)}</strong>
+    </article>
+  `;
+}
+
 function macroCards(target) {
   return `
     ${macroCard("Calories", `${Math.round(target.calories)} kcal`)}
@@ -349,31 +530,6 @@ function macroCard(label, value) {
       <strong class="macro-value">${escapeHtml(value)}</strong>
     </article>
   `;
-}
-
-function renderQuestionnaireContext() {
-  if (!state.hasAuth) {
-    setQuestionnaireNote("Preview and save only work when this page is opened inside Telegram.", "warning");
-    return;
-  }
-
-  if (!state.profile) {
-    setQuestionnaireNote("No saved target yet. Work through the sections below to build one.", "neutral");
-    return;
-  }
-
-  if (!state.profile.questionnaire_answers) {
-    setQuestionnaireNote(
-      "This target came from an older migrated profile. Open the sections below only if you want to rebuild it.",
-      "info"
-    );
-    return;
-  }
-
-  setQuestionnaireNote(
-    "Saved answers loaded. Change any field, preview again, then save to replace the current target.",
-    "neutral"
-  );
 }
 
 function setQuestionnaireNote(message, tone = "neutral") {
