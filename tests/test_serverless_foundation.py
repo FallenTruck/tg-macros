@@ -2,7 +2,7 @@ import json
 import asyncio
 import os
 import unittest
-from unittest.mock import patch
+from unittest.mock import AsyncMock, patch
 
 from lambda_handlers import api, webhook, worker
 
@@ -67,6 +67,25 @@ class ServerlessFoundationTests(unittest.TestCase):
             result = worker.handler(event, None)
         self.assertEqual(result, {"batchItemFailures": []})
 
+    def test_duplicate_telegram_update_is_acknowledged_without_second_processing_claim(self):
+        client = FakeDynamo()
+        body = json.dumps(
+            {
+                "schema_version": 1,
+                "kind": "telegram_update",
+                "update_id": 77,
+                "telegram_user_id": 7,
+                "payload": {},
+            }
+        )
+        event = {"Records": [{"messageId": "one", "body": body}, {"messageId": "two", "body": body}]}
+        with patch("lambda_handlers.worker._dynamodb", return_value=client), patch.dict(
+            os.environ, {"IDEMPOTENCY_TABLE": "idempotency"}, clear=False
+        ):
+            result = worker.handler(event, None)
+        self.assertEqual(result, {"batchItemFailures": []})
+        self.assertEqual(len(client.items), 1)
+
     def test_worker_returns_partial_failure_for_retry(self):
         client = FakeDynamo()
         event = {
@@ -89,6 +108,30 @@ class ServerlessFoundationTests(unittest.TestCase):
         ):
             result = worker.handler(event, None)
         self.assertEqual(result, {"batchItemFailures": [{"itemIdentifier": "poison-1"}]})
+
+    def test_worker_acknowledges_non_retryable_application_input(self):
+        client = FakeDynamo()
+        event = {
+            "Records": [
+                {
+                    "messageId": "invalid-input",
+                    "body": json.dumps(
+                        {
+                            "schema_version": 1,
+                            "kind": "telegram_update",
+                            "update_id": 88,
+                            "payload": {"message": {"text": "invalid"}},
+                        }
+                    ),
+                }
+            ]
+        }
+        with patch("lambda_handlers.worker._dynamodb", return_value=client), patch(
+            "lambda_handlers.worker.process_update_message",
+            new=AsyncMock(side_effect=worker.NonRetryableUpdate("bad input")),
+        ), patch.dict(os.environ, {"IDEMPOTENCY_TABLE": "idempotency"}, clear=False):
+            result = worker.handler(event, None)
+        self.assertEqual(result, {"batchItemFailures": []})
 
     def test_webhook_rejects_missing_secret(self):
         event = {"headers": {}, "body": "{}"}

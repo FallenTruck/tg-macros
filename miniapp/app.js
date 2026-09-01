@@ -79,7 +79,7 @@ form.addEventListener("submit", async (event) => {
   try {
     previewButton.disabled = true;
     const payload = collectAnswers();
-    const response = await apiFetch("/miniapp/api/targets/preview", {
+    const response = await apiFetch("/api/targets/preview", {
       method: "POST",
       body: JSON.stringify(payload),
     });
@@ -104,7 +104,7 @@ saveButton.addEventListener("click", async () => {
   try {
     saveButton.disabled = true;
     const payload = collectAnswers();
-    const response = await apiFetch("/miniapp/api/profile", {
+    const response = await apiFetch("/api/profile", {
       method: "POST",
       body: JSON.stringify(payload),
     });
@@ -157,7 +157,7 @@ async function bootstrap() {
   }
 
   try {
-    const response = await apiFetch("/miniapp/api/profile");
+    const response = await apiFetch("/api/profile");
     state.meta = response;
     state.profile = response.profile || null;
     state.viewer = normalizeViewer(response.viewer, state.viewer);

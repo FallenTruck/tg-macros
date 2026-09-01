@@ -7,4 +7,4 @@ s3_prefix = "tg-macros-dev"
 region = "ap-southeast-1"
 confirm_changeset = false
 capabilities = "CAPABILITY_IAM"
-parameter_overrides = "EnvironmentName=dev BotTokenParameterName=/tg-macros/prod/BOT_TOKEN OpenAIKeyParameterName=/tg-macros/prod/OPENAI_API_KEY WebhookSecretParameterName=/tg-macros/prod/TELEGRAM_WEBHOOK_SECRET"
+parameter_overrides = "EnvironmentName=dev BotTokenParameterName=/tg-macros/prod/BOT_TOKEN OpenAIKeyParameterName=/tg-macros/prod/OPENAI_API_KEY WebhookSecretParameterName=/tg-macros/prod/TELEGRAM_WEBHOOK_SECRET MiniAppUrl=https://d1tav2v1lpusva.cloudfront.net"

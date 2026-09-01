@@ -1,0 +1,6 @@
+boto3
+python-telegram-bot
+openai
+pillow
+fastapi
+mangum
