@@ -1,0 +1,16 @@
+.git/
+.venv/
+.tools/
+.DS_Store
+.aws-sam/
+.pytest_cache/
+__pycache__/
+tests/
+metrics/
+images/
+bench_manifest.csv
+meals.csv
+meals_v2.csv
+user_profiles.json
+food_catalog.json
+catalog_suggestions.json

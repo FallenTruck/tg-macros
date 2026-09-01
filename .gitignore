@@ -1,2 +1,7 @@
 .env
 .tools/
+.aws-sam/
+.pytest_cache/
+__pycache__/
+.venv/
+.DS_Store
