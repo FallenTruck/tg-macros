@@ -67,7 +67,17 @@ class _FakeTelegramApplication:
 class MacroApiTests(unittest.TestCase):
     def setUp(self):
         self.tmpdir = tempfile.TemporaryDirectory()
-        self.profile_path = Path(self.tmpdir.name) / "profiles.json"
+        self.tmp_path = Path(self.tmpdir.name)
+        self.profile_path = self.tmp_path / "profiles.json"
+        self.metrics_dir = self.tmp_path / "metrics"
+        self.metrics_path = self.metrics_dir / "estimates.jsonl"
+        self.metrics_patcher = patch.multiple(
+            macro_api,
+            METRICS_DIR=self.metrics_dir,
+            ESTIMATES_LOG_PATH=self.metrics_path,
+        )
+        self.metrics_patcher.start()
+        self.addCleanup(self.metrics_patcher.stop)
         self.client = TestClient(macro_api.app)
 
     def tearDown(self):
@@ -265,6 +275,18 @@ class MacroApiTests(unittest.TestCase):
         self.assertIn("total_low", body)
         self.assertIn("total_high", body)
         self.assertEqual(body["calories"], body["total_best"]["calories"])
+        self.assertEqual(macro_api.METRICS_DIR, self.metrics_dir)
+        self.assertEqual(macro_api.ESTIMATES_LOG_PATH, self.metrics_path)
+        self.assertTrue(self.metrics_path.is_file())
+        metrics_records = [
+            json.loads(line)
+            for line in self.metrics_path.read_text(encoding="utf-8").splitlines()
+        ]
+        self.assertEqual(len(metrics_records), 1)
+        self.assertEqual(metrics_records[0]["event_type"], "estimate")
+        self.assertEqual(metrics_records[0]["request"]["caption"], "x")
+        self.assertEqual(metrics_records[0]["estimate"]["meal_name"], "meal")
+        self.assertEqual(body["metrics_event_id"], metrics_records[0]["event_id"])
 
     def test_reject_invalid_ranges(self):
         payload = self._valid_estimate_payload()
