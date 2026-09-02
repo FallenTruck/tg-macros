@@ -166,8 +166,15 @@ class _FakeTable:
             raise AssertionError(data)
 
         checks = predicates(expression)
+        filter_expression = kwargs.get("FilterExpression")
+        filter_check = None
+        if filter_expression is not None:
+            filter_values = filter_expression.get_expression()["values"]
+            filter_check = (filter_values[0].__dict__["name"], filter_values[1])
         items = []
         for item in self.items.values():
+            if filter_check and item.get(filter_check[0]) != filter_check[1]:
+                continue
             if all(
                 (item.get(name) == values[0])
                 if mode == "eq"
@@ -278,6 +285,49 @@ class ServerlessDataTests(unittest.TestCase):
         repo.save_profile(identity, UserProfile(101, "u", "User", MacroTotal(2000, 150, 200, 60), answers))
         repo.save_profile(identity, UserProfile(101, "u", "User", MacroTotal(2100, 150, 200, 60), answers))
         self.assertEqual(len(repo.list_targets(identity.user_id)), 2)
+
+    def test_query_limit_is_preserved_across_pages_for_recent_meals(self):
+        table = _PaginatingTable()
+        repo = DynamoNutritionRepository(table, table_name="fitness", now_fn=lambda: self.now)
+        identity = repo.resolve_identity(101, "u", "User")
+        for index in range(3):
+            action = repo.create_pending_meal(
+                identity,
+                chat_id=9,
+                request_message_id=20 + index,
+                caption=f"rice bowl {index}",
+                estimate=_estimate(),
+                eaten_at=datetime(2026, 1, 15, 4 + index, tzinfo=timezone.utc),
+            )
+            repo.finalize_action(identity, action.token, "confirm")
+        self.assertEqual(len(repo.list_recent_meals(identity, limit=2)), 2)
+
+    def test_recent_meals_limit_counts_confirmed_records_after_cancelled_record(self):
+        table = _FakeTable()
+        repo = DynamoNutritionRepository(table, table_name="fitness", now_fn=lambda: self.now)
+        identity = repo.resolve_identity(101, "u", "User")
+        cancelled = repo.create_pending_meal(
+            identity,
+            chat_id=9,
+            request_message_id=30,
+            caption="cancelled bowl",
+            estimate=_estimate(),
+            eaten_at=datetime(2026, 1, 15, 8, tzinfo=timezone.utc),
+        )
+        repo.finalize_action(identity, cancelled.token, "cancel")
+        for index in range(3):
+            action = repo.create_pending_meal(
+                identity,
+                chat_id=9,
+                request_message_id=31 + index,
+                caption=f"confirmed bowl {index}",
+                estimate=_estimate(),
+                eaten_at=datetime(2026, 1, 15, 7 - index, tzinfo=timezone.utc),
+            )
+            repo.finalize_action(identity, action.token, "confirm")
+        recent = repo.list_recent_meals(identity, limit=2)
+        self.assertEqual(len(recent), 2)
+        self.assertTrue(all(meal.status == "confirmed" for meal in recent))
 
     def test_workflow_meal_details_scaling_confirmation_and_duplicate_are_durable(self):
         identity = self.repo.resolve_identity(101, "u", "User")

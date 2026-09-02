@@ -17,7 +17,7 @@ from decimal import Decimal
 from typing import Any, Iterable, List, Mapping, Optional, Sequence
 from zoneinfo import ZoneInfo
 
-from boto3.dynamodb.conditions import Key
+from boto3.dynamodb.conditions import Attr, Key
 from boto3.dynamodb.types import TypeSerializer
 
 from .models import (
@@ -295,6 +295,7 @@ class DynamoNutritionRepository:
     def _query(self, key_expression: Any, **kwargs: Any) -> list[dict[str, Any]]:
         query_kwargs = dict(kwargs)
         results: list[dict[str, Any]] = []
+        requested_limit = query_kwargs.get("Limit")
         while True:
             result = self.table.query(KeyConditionExpression=key_expression, **query_kwargs)
             if isinstance(result, Mapping):
@@ -302,9 +303,13 @@ class DynamoNutritionRepository:
                 last_key = result.get("LastEvaluatedKey")
             else:
                 last_key = None
+            if requested_limit is not None and len(results) >= int(requested_limit):
+                return results[: int(requested_limit)]
             if not last_key:
                 break
             query_kwargs["ExclusiveStartKey"] = last_key
+            if requested_limit is not None:
+                query_kwargs["Limit"] = max(1, int(requested_limit) - len(results))
         return results
 
     def _transact_write(self, operations: Sequence[dict[str, Any]]) -> None:
@@ -857,8 +862,9 @@ class DynamoNutritionRepository:
             Key("PK").eq(identity.pk) & Key("SK").begins_with("MEAL#"),
             ScanIndexForward=False,
             Limit=max(1, int(limit)),
+            FilterExpression=Attr("status").eq("confirmed"),
         )
-        meals = [_meal_from_item(item) for item in items if item.get("status") == "confirmed"]
+        meals = [_meal_from_item(item) for item in items]
         return list(reversed(meals))
 
     def daily_summary(self, identity: ServerlessIdentity, target_date: date, timezone_name: str = DEFAULT_TIMEZONE) -> DailyMacroSummary:
