@@ -106,6 +106,51 @@ async def get_profile(
     return _no_store(service.profile_response(identity))
 
 
+@app.get("/api/workout/programme")
+async def get_workout_programme(
+    x_telegram_init_data: str = Header(default="", alias="X-Telegram-Init-Data"),
+    version_id: Optional[str] = Query(default=None),
+) -> JSONResponse:
+    """Return the shared programme; no user execution state is included."""
+
+    service = _service()
+    _auth_identity(x_telegram_init_data, service)
+    try:
+        result = service.workout_programme(version_id=version_id)
+    except KeyError as err:
+        raise HTTPException(status_code=404, detail=str(err)) from err
+    return _no_store(result)
+
+
+@app.get("/api/workout/programme/days")
+async def get_workout_programme_days(
+    x_telegram_init_data: str = Header(default="", alias="X-Telegram-Init-Data"),
+    version_id: Optional[str] = Query(default=None),
+) -> JSONResponse:
+    service = _service()
+    _auth_identity(x_telegram_init_data, service)
+    try:
+        programme = service.workout_programme(version_id=version_id)
+    except KeyError as err:
+        raise HTTPException(status_code=404, detail=str(err)) from err
+    return _no_store({"programme": programme["programme"], "version": programme["version"], "days": programme["days"]})
+
+
+@app.get("/api/workout/programme/days/{day_code}")
+async def get_workout_programme_day(
+    day_code: str,
+    x_telegram_init_data: str = Header(default="", alias="X-Telegram-Init-Data"),
+    version_id: Optional[str] = Query(default=None),
+) -> JSONResponse:
+    service = _service()
+    _auth_identity(x_telegram_init_data, service)
+    try:
+        result = service.workout_programme_day(day_code, version_id=version_id)
+    except KeyError as err:
+        raise HTTPException(status_code=404, detail=str(err)) from err
+    return _no_store(result)
+
+
 @app.post("/api/targets/preview")
 async def preview_targets(
     payload: Dict[str, Any] = Body(...),

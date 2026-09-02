@@ -4,11 +4,13 @@ const initData = tg?.initData ?? "";
 const HOME_VIEW = "home";
 const PROFILE_VIEW = "profile";
 const QUESTIONNAIRE_VIEW = "questionnaire";
+const WORKOUT_VIEW = "workout";
 
 const state = {
   meta: null,
   profile: null,
   preview: null,
+  workoutProgramme: null,
   viewer: buildViewerFromTelegram(tg?.initDataUnsafe?.user ?? null),
   hasAuth: Boolean(initData),
   activeView: HOME_VIEW,
@@ -30,6 +32,9 @@ const previewEmpty = document.querySelector("#preview-empty");
 const homeView = document.querySelector("#home-view");
 const profileView = document.querySelector("#profile-view");
 const questionnaireView = document.querySelector("#questionnaire-view");
+const workoutView = document.querySelector("#workout-view");
+const workoutProgrammeEl = document.querySelector("#workout-programme");
+const workoutVersionMeta = document.querySelector("#workout-version-meta");
 
 const welcomeTitle = document.querySelector("#welcome-title");
 const welcomeHandle = document.querySelector("#welcome-handle");
@@ -142,6 +147,7 @@ async function bootstrap() {
   renderViewer();
   renderHomeSummary();
   renderProfileSummary();
+  renderWorkoutProgramme();
   syncRoute();
 
   setStatus(
@@ -169,13 +175,25 @@ async function bootstrap() {
       hydrateForm(state.profile.questionnaire_answers);
     }
     renderQuestionnaireContext();
+    renderWorkoutProgramme();
     setStatus("", "neutral");
+    await loadWorkoutProgramme();
   } catch (error) {
     setStatus(
       error.message || "Could not load your saved target. You can still fill in the questionnaire.",
       "error"
     );
     renderQuestionnaireContext();
+  }
+}
+
+async function loadWorkoutProgramme() {
+  try {
+    const response = await apiFetch("/api/workout/programme");
+    state.workoutProgramme = response;
+    renderWorkoutProgramme();
+  } catch (error) {
+    workoutProgrammeEl.innerHTML = `<section class="panel profile-panel"><p class="summary-empty">${escapeHtml(error.message || "Could not load the workout programme.")}</p></section>`;
   }
 }
 
@@ -233,7 +251,7 @@ function viewerInitialValue(viewer) {
 
 function normalizeRoute(hash = window.location.hash) {
   const route = String(hash || "").replace(/^#/, "").trim().toLowerCase();
-  if (route === PROFILE_VIEW || route === QUESTIONNAIRE_VIEW) {
+  if (route === PROFILE_VIEW || route === QUESTIONNAIRE_VIEW || route === WORKOUT_VIEW) {
     return route;
   }
   return HOME_VIEW;
@@ -263,17 +281,96 @@ function renderRoute(route) {
   homeView.hidden = route !== HOME_VIEW;
   profileView.hidden = route !== PROFILE_VIEW;
   questionnaireView.hidden = route !== QUESTIONNAIRE_VIEW;
+  workoutView.hidden = route !== WORKOUT_VIEW;
 
   for (const button of navButtons) {
-    const buttonRoute = button.dataset.route === PROFILE_VIEW ? PROFILE_VIEW : HOME_VIEW;
+    const buttonRoute = button.dataset.route === PROFILE_VIEW
+      ? PROFILE_VIEW
+      : button.dataset.route === WORKOUT_VIEW
+        ? WORKOUT_VIEW
+        : HOME_VIEW;
     const isActive = buttonRoute === HOME_VIEW
       ? route === HOME_VIEW
-      : route === PROFILE_VIEW || route === QUESTIONNAIRE_VIEW;
+      : buttonRoute === WORKOUT_VIEW
+        ? route === WORKOUT_VIEW
+        : route === PROFILE_VIEW || route === QUESTIONNAIRE_VIEW;
     button.classList.toggle("is-active", isActive);
     button.setAttribute("aria-current", isActive ? "page" : "false");
   }
 
   renderPreview();
+}
+
+function renderWorkoutProgramme() {
+  if (!workoutProgrammeEl) {
+    return;
+  }
+  const programme = state.workoutProgramme;
+  if (!programme || !Array.isArray(programme.days)) {
+    return;
+  }
+  workoutVersionMeta.textContent = programme.version?.version_id
+    ? `Version ${programme.version.version_id}`
+    : "Read-only programme";
+  const exercises = Object.fromEntries((programme.exercises || []).map((item) => [item.exercise_id, item]));
+  workoutProgrammeEl.innerHTML = programme.days.map((day) => `
+    <section class="panel workout-day-card">
+      <div class="panel-head">
+        <div>
+          <p class="section-label">${escapeHtml(day.planned_weekday || "Planned day")}</p>
+          <h3>${escapeHtml(day.display_name || day.day_code)}</h3>
+        </div>
+        <p>Flexible date</p>
+      </div>
+      <p class="workout-day-note">${escapeHtml(day.notes || "")}</p>
+      <ol class="workout-prescription-list">
+        ${(day.prescriptions || []).map((prescription) => renderPrescription(prescription, exercises)).join("")}
+      </ol>
+    </section>
+  `).join("");
+}
+
+function renderPrescription(prescription, exercises) {
+  const options = (prescription.allowed_exercise_ids || []).map((id) => exercises[id]).filter(Boolean);
+  const targets = prescription.option_targets || {};
+  const sameTarget = options.length <= 1 || options.every((item) => JSON.stringify(targets[item.exercise_id] || {}) === JSON.stringify(targets[options[0]?.exercise_id] || {}));
+  const setLabel = formatSetRange(prescription.set_min, prescription.set_max);
+  const sharedTarget = formatTarget(setLabel, prescription.rep_min, prescription.rep_max, null);
+  const optionsMarkup = options.map((exercise) => {
+    const target = sameTarget ? sharedTarget : formatOptionTarget(prescription, exercise.exercise_id, targets[exercise.exercise_id]);
+    const convention = exercise.loading_convention === "per_dumbbell_kg" ? " · kg per dumbbell" : "";
+    return `<li>${escapeHtml(exercise.canonical_name)}${escapeHtml(convention)}${target ? ` — ${escapeHtml(target)}` : ""}</li>`;
+  }).join("");
+  return `<li class="workout-prescription">
+    <div class="workout-prescription-head"><strong>${escapeHtml(prescription.display_label || "Exercise")}</strong>${prescription.optional ? " <span class=\"workout-optional\">Optional</span>" : ""}</div>
+    <ul class="workout-options">${optionsMarkup || `<li>${escapeHtml((prescription.allowed_exercise_ids || []).join(" or "))}</li>`}</ul>
+    ${prescription.notes ? `<p class="workout-prescription-note">${escapeHtml(prescription.notes)}</p>` : ""}
+  </li>`;
+}
+
+function formatOptionTarget(prescription, exerciseId, target) {
+  const selected = target || {};
+  return formatTarget(
+    formatSetRange(selected.set_min ?? prescription.set_min, selected.set_max ?? prescription.set_max),
+    selected.rep_min,
+    selected.rep_max,
+    selected.execution_type === "timed" ? selected.target_note || "Timed target" : null,
+  );
+}
+
+function formatTarget(setLabel, repMin, repMax, timedLabel) {
+  if (timedLabel) {
+    return `${setLabel} · ${timedLabel}`;
+  }
+  if (repMin == null || repMax == null) {
+    return setLabel;
+  }
+  return `${setLabel} · ${repMin}–${repMax} reps`;
+}
+
+function formatSetRange(min, max) {
+  if (min == null) return "Sets as configured";
+  return min === max ? `${min} sets` : `${min}–${max} sets`;
 }
 
 function renderViewer() {

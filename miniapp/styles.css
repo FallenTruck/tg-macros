@@ -642,6 +642,52 @@ button:disabled {
   margin-top: 16px;
 }
 
+.workout-programme {
+  display: grid;
+  gap: 16px;
+  margin-top: 16px;
+}
+
+.workout-day-card {
+  padding: 22px;
+}
+
+.workout-day-note,
+.workout-prescription-note {
+  color: var(--muted);
+  font-size: 0.9rem;
+}
+
+.workout-prescription-list {
+  display: grid;
+  gap: 14px;
+  margin: 18px 0 0;
+  padding-left: 22px;
+}
+
+.workout-prescription {
+  padding-left: 4px;
+}
+
+.workout-prescription-head {
+  font-family: Georgia, "Times New Roman", serif;
+}
+
+.workout-options {
+  margin: 7px 0 0;
+  padding-left: 18px;
+  color: var(--muted);
+}
+
+.workout-optional {
+  display: inline-block;
+  margin-left: 6px;
+  color: var(--accent-deep);
+  font-size: 0.8rem;
+  font-family: "Avenir Next", "Segoe UI", sans-serif;
+  font-weight: 600;
+}
+
 .preview-head {
   display: flex;
   align-items: flex-end;
@@ -657,7 +703,7 @@ button:disabled {
   transform: translateX(-50%);
   width: min(920px, calc(100vw - 24px));
   display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
+  grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 10px;
   padding: 10px;
   border: 1px solid rgba(67, 49, 27, 0.12);

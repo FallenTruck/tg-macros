@@ -28,6 +28,14 @@ from .models import (
     PendingMealAction,
     UserProfile,
 )
+from .workout_programme import (
+    INITIAL_VERSION_ID,
+    PROGRAMME_ID,
+    PROGRAMME_PK,
+    day_response,
+    initial_programme_records,
+    programme_response,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -54,6 +62,12 @@ class ActionExpired(DataError):
 
 
 class ActionFinalized(DataError):
+    pass
+
+
+class ProgrammeSeedConflict(DataError):
+    """Raised when a deterministic programme key contains different data."""
+
     pass
 
 
@@ -345,6 +359,70 @@ class DynamoNutritionRepository:
             self.table.transact_write_items(TransactItems=low_level_operations)
             return
         raise RuntimeError("DynamoDB transaction client is not configured")
+
+    # ---- Shared workout programme --------------------------------------------
+
+    def _programme_records(self) -> list[dict[str, Any]]:
+        records = self._query(Key("PK").eq(PROGRAMME_PK))
+        records.extend(self._query(Key("PK").eq("CATALOG#EXERCISES")))
+        return [_from_storage(item) for item in records]
+
+    def get_workout_programme(self, version_id: Optional[str] = None) -> Optional[dict[str, Any]]:
+        """Return a shared programme assembled from immutable records."""
+
+        records = self._programme_records()
+        metadata = next((item for item in records if item.get("entity_type") == "workout_programme"), None)
+        if metadata is None:
+            return None
+        selected_version = str(version_id or metadata.get("active_version_id") or "").strip()
+        if not selected_version:
+            return None
+        selected = [
+            item
+            for item in records
+            if item.get("entity_type") in {"workout_programme", "workout_programme_version", "workout_programme_day", "programme_prescription", "exercise"}
+            and (item.get("entity_type") in {"workout_programme", "exercise"} or item.get("version_id") == selected_version)
+        ]
+        result = programme_response(selected, version_id=selected_version)
+        return result if result.get("version") else None
+
+    def get_workout_programme_day(self, day_code: str, version_id: Optional[str] = None) -> Optional[dict[str, Any]]:
+        programme = self.get_workout_programme(version_id=version_id)
+        if programme is None:
+            return None
+        return day_response(programme, day_code)
+
+    def seed_workout_programme(self, *, dry_run: bool = False) -> dict[str, int]:
+        """Reconcile the deterministic initial programme without overwriting."""
+
+        records = initial_programme_records()
+        existing: dict[tuple[str, str], Optional[dict[str, Any]]] = {}
+        for desired in records:
+            key = (str(desired["PK"]), str(desired["SK"]))
+            current = self._get({"PK": key[0], "SK": key[1]})
+            existing[key] = _from_storage(current) if current else None
+            if current is not None and _from_storage(current) != desired:
+                raise ProgrammeSeedConflict(f"conflicting programme record: {key[0]} / {key[1]}")
+        if dry_run:
+            return {"created": 0, "existing": sum(value is not None for value in existing.values()), "would_create": sum(value is None for value in existing.values()), "records": len(records)}
+        created = 0
+        already_existing = 0
+        for desired in records:
+            key = (str(desired["PK"]), str(desired["SK"]))
+            if existing[key] is not None:
+                already_existing += 1
+                continue
+            try:
+                self.table.put_item(Item=_to_storage(desired), ConditionExpression="attribute_not_exists(PK)")
+                created += 1
+            except Exception as err:
+                if not _is_conditional_failure(err):
+                    raise
+                current = self._get({"PK": key[0], "SK": key[1]})
+                if current is None or _from_storage(current) != desired:
+                    raise ProgrammeSeedConflict(f"conflicting programme record after concurrent write: {key[0]} / {key[1]}") from err
+                already_existing += 1
+        return {"created": created, "existing": already_existing, "would_create": 0, "records": len(records)}
 
     # ---- Identity and profiles -------------------------------------------------
 

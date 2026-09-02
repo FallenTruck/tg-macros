@@ -28,6 +28,7 @@ from .serverless_data import (
     parse_utc,
     utc_iso,
 )
+from .workout_programme import PROGRAMME_ID
 
 logger = logging.getLogger(__name__)
 
@@ -213,6 +214,20 @@ class NutritionService:
 
     def target_history(self, identity: ServerlessIdentity) -> list[dict[str, Any]]:
         return self.repository.list_targets(identity.user_id)
+
+    # ---- Read-only shared workout programme -------------------------------
+
+    def workout_programme(self, version_id: Optional[str] = None) -> dict[str, Any]:
+        programme = self.repository.get_workout_programme(version_id=version_id)
+        if programme is None:
+            raise KeyError(f"Workout programme is unavailable: {PROGRAMME_ID}")
+        return programme
+
+    def workout_programme_day(self, day_code: str, version_id: Optional[str] = None) -> dict[str, Any]:
+        day = self.repository.get_workout_programme_day(day_code, version_id=version_id)
+        if day is None:
+            raise KeyError(f"Workout programme day is unavailable: {day_code}")
+        return day
 
     def meals_for_date_range(self, identity: ServerlessIdentity, start: date, end: date) -> list[StoredMeal]:
         profile = self.repository.get_profile(identity.user_id)

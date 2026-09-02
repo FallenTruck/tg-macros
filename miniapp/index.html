@@ -60,6 +60,34 @@
               Set Up Targets
             </a>
           </section>
+
+          <section class="panel home-summary-panel">
+            <div class="panel-head">
+              <div>
+                <p class="section-label">Training</p>
+                <h3>Shared workout programme</h3>
+              </div>
+              <p>Pull · Support + Core · Push</p>
+            </div>
+            <p class="summary-empty">View the current shared programme and its planned training days.</p>
+            <a href="#workout" class="primary summary-cta action-link">View Programme</a>
+          </section>
+        </section>
+
+        <section class="app-view" id="workout-view" data-view="workout" hidden>
+          <section class="panel profile-panel">
+            <div class="panel-head">
+              <div>
+                <p class="section-label">Training</p>
+                <h2>Shared workout programme</h2>
+              </div>
+              <p id="workout-version-meta">Read-only programme</p>
+            </div>
+            <p class="lead-copy">The programme is shared. Loads and workout history will be recorded independently in a later update.</p>
+          </section>
+          <div id="workout-programme" class="workout-programme" aria-live="polite">
+            <section class="panel profile-panel"><p class="summary-empty">Open this Mini App from Telegram to load the programme.</p></section>
+          </div>
         </section>
 
         <section class="app-view" id="profile-view" data-view="profile" hidden>
@@ -247,6 +275,12 @@
           />
         </svg>
         <span>Profile</span>
+      </a>
+      <a href="#workout" class="nav-item" id="nav-workout" data-route="workout">
+        <svg viewBox="0 0 24 24" aria-hidden="true">
+          <path d="M5 9v6m14-6v6M8 7v10m8-10v10M8 12h8M3 10v4m18-4v4" />
+        </svg>
+        <span>Workout</span>
       </a>
     </nav>
 
