@@ -196,10 +196,18 @@ def _estimate_payload(estimate: MealEstimate) -> dict[str, Any]:
                 "protein_g": item.protein_g,
                 "carbs_g": item.carbs_g,
                 "fat_g": item.fat_g,
+                "evidence": item.evidence,
+                **({"portion_low_g": item.portion_low_g} if item.portion_low_g is not None else {}),
+                **({"portion_high_g": item.portion_high_g} if item.portion_high_g is not None else {}),
+                **({"identification_confidence": item.identification_confidence} if item.identification_confidence is not None else {}),
+                **({"portion_confidence": item.portion_confidence} if item.portion_confidence is not None else {}),
             }
             for item in estimate.items
         ],
         "variance_drivers": list(estimate.variance_drivers),
+        "item_breakdown_complete": estimate.item_breakdown_complete,
+        "reconciliation_status": estimate.reconciliation_status,
+        "canonical_total": estimate.total_best.to_payload(),
     }
     if estimate.total_low is not None:
         payload["total_low"] = estimate.total_low.to_payload()
@@ -207,6 +215,18 @@ def _estimate_payload(estimate: MealEstimate) -> dict[str, Any]:
         payload["total_high"] = estimate.total_high.to_payload()
     if estimate.metrics_event_id:
         payload["metrics_event_id"] = estimate.metrics_event_id
+    if estimate.identification_confidence is not None:
+        payload["identification_confidence"] = estimate.identification_confidence
+    if estimate.portion_confidence is not None:
+        payload["portion_confidence"] = estimate.portion_confidence
+    if estimate.macro_confidence is not None:
+        payload["macro_confidence"] = estimate.macro_confidence
+    if estimate.model_reported_total is not None:
+        payload["model_reported_total"] = estimate.model_reported_total.to_payload()
+    if estimate.item_derived_total is not None:
+        payload["item_derived_total"] = estimate.item_derived_total.to_payload()
+    if estimate.follow_up_question:
+        payload["follow_up_question"] = estimate.follow_up_question
     return payload
 
 
@@ -565,6 +585,9 @@ class DynamoNutritionRepository:
         action_ttl_seconds: int = ACTION_TTL_SECONDS,
         update_id: Optional[int] = None,
         model_metadata: Optional[Mapping[str, Any]] = None,
+        telegram_file_id: Optional[str] = None,
+        telegram_file_unique_id: Optional[str] = None,
+        telegram_message_id: Optional[int] = None,
     ) -> PendingMealAction:
         now = self._now()
         eaten_iso = utc_iso(eaten_at or now)
@@ -575,6 +598,13 @@ class DynamoNutritionRepository:
         action_sk = f"ACTION#{token}"
         expires_at = epoch_seconds(now) + int(action_ttl_seconds)
         original_payload = _estimate_payload(estimate)
+        traceability = {}
+        if telegram_file_id:
+            traceability["telegram_file_id"] = str(telegram_file_id)
+        if telegram_file_unique_id:
+            traceability["telegram_file_unique_id"] = str(telegram_file_unique_id)
+        if telegram_message_id is not None:
+            traceability["telegram_message_id"] = int(telegram_message_id)
         meal_item = {
             "PK": identity.pk,
             "SK": canonical_sk,
@@ -593,6 +623,7 @@ class DynamoNutritionRepository:
             "request_message_id": int(request_message_id),
             "created_at": utc_iso(now),
             "updated_at": utc_iso(now),
+            **traceability,
         }
         pointer_item = {
             "PK": identity.pk,
@@ -664,6 +695,7 @@ class DynamoNutritionRepository:
             "expires_at": expires_at,
             "update_id": update_id,
             "model_metadata": dict(model_metadata or {}),
+            **traceability,
         }
         item_operations.append(
             {

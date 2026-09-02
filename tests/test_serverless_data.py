@@ -319,6 +319,28 @@ class ServerlessDataTests(unittest.TestCase):
         self.assertTrue(self.repo.finalize_action(identity, cancel_action.token, "cancel").duplicate)
         self.assertEqual(cancelled.meal.status, "cancelled")
 
+    def test_new_photo_traceability_is_stored_without_raw_image_bytes(self):
+        identity = self.repo.resolve_identity(101, "u", "User")
+        action = self.repo.create_pending_meal(
+            identity,
+            chat_id=9,
+            request_message_id=10,
+            caption="traceable bowl",
+            estimate=_estimate(),
+            telegram_file_id="telegram-file-id",
+            telegram_file_unique_id="telegram-file-unique-id",
+            telegram_message_id=10,
+        )
+        records = [item for (pk, _sk), item in self.table.items.items() if pk == identity.pk]
+        traced = [item for item in records if item.get("entity_type") in {"meal", "meal_action"}]
+        self.assertEqual(len(traced), 2)
+        for item in traced:
+            self.assertEqual(item["telegram_file_id"], "telegram-file-id")
+            self.assertEqual(item["telegram_file_unique_id"], "telegram-file-unique-id")
+            self.assertEqual(item["telegram_message_id"], 10)
+            self.assertNotIn("image_bytes", item)
+        self.assertEqual(action.request_message_id, 10)
+
     def test_action_ownership_and_expiry_are_enforced(self):
         owner = self.repo.resolve_identity(101, "u", "User")
         other = self.repo.resolve_identity(202, "v", "Other")

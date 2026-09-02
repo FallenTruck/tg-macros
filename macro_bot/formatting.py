@@ -36,6 +36,16 @@ def format_macro_message(estimate: MealEstimate) -> str:
     else:
         range_line = "- Range: not available"
 
+    follow_up = (
+        f"- Quick check: {estimate.follow_up_question}\n"
+        if estimate.follow_up_question
+        else ""
+    )
+    uncertainty = (
+        f"- Main uncertainty: {'; '.join(str(item) for item in estimate.variance_drivers[:2])}\n"
+        if estimate.variance_drivers
+        else ""
+    )
     return (
         "🍽️ Macro estimate\n"
         f"- Meal: {estimate.meal_name}\n"
@@ -45,7 +55,9 @@ def format_macro_message(estimate: MealEstimate) -> str:
         f"- Fat: {float(estimate.fat_g):.1f} g\n"
         f"{range_line}\n"
         f"- Assumptions: {estimate.assumptions_summary()}\n"
+        f"{uncertainty}"
         f"- Confidence: {int(float(estimate.confidence) * 100)}%\n"
+        f"{follow_up}"
         "Controls: ⬇️ -20% / ⬆️ +20% then ✅ Log"
     )
 

@@ -8,6 +8,7 @@ QUESTIONNAIRE_VERSION = "miniapp-v2"
 QUESTIONNAIRE_SEXES = {"male", "female"}
 QUESTIONNAIRE_GOALS = {"lose", "maintain", "gain"}
 QUESTIONNAIRE_ACTIVITY_LEVELS = {"sedentary", "light", "moderate", "active", "very_active"}
+ITEM_EVIDENCE_LEVELS = {"clearly_visible", "probably_visible", "partially_occluded", "inferred", "uncertain"}
 
 
 @dataclass(frozen=True)
@@ -72,6 +73,11 @@ class MealItemEstimate:
     protein_g: float
     carbs_g: float
     fat_g: float
+    portion_low_g: Optional[float] = None
+    portion_high_g: Optional[float] = None
+    identification_confidence: Optional[float] = None
+    portion_confidence: Optional[float] = None
+    evidence: str = "uncertain"
 
     @classmethod
     def from_payload(cls, payload: Dict[str, object]) -> "MealItemEstimate":
@@ -80,14 +86,41 @@ class MealItemEstimate:
         if missing:
             raise ValueError(f"Missing item keys in macro response: {', '.join(missing)}")
 
+        evidence = str(payload.get("evidence", "uncertain") or "uncertain")
+        if evidence not in ITEM_EVIDENCE_LEVELS:
+            raise ValueError(f"Invalid item evidence level: {evidence}")
+
+        def optional_confidence(name: str) -> Optional[float]:
+            value = payload.get(name)
+            if value is None or value == "":
+                return None
+            confidence = float(value)
+            if confidence < 0 or confidence > 1:
+                raise ValueError(f"{name} must be within [0,1]")
+            return confidence
+
+        portion_low = payload.get("portion_low_g")
+        portion_high = payload.get("portion_high_g")
+        portion = float(payload["portion_g"])
+        portion_low_value = float(portion_low) if portion_low is not None else None
+        portion_high_value = float(portion_high) if portion_high is not None else None
+        if portion_low_value is not None and portion_high_value is not None:
+            if portion_low_value > portion_high_value or not (portion_low_value <= portion <= portion_high_value):
+                raise ValueError("portion_g must be within portion_low_g and portion_high_g")
+
         return cls(
             name=str(payload["name"]),
-            portion_g=float(payload["portion_g"]),
+            portion_g=portion,
             assumptions=str(payload["assumptions"]),
             calories=float(payload["calories"]),
             protein_g=float(payload["protein_g"]),
             carbs_g=float(payload["carbs_g"]),
             fat_g=float(payload["fat_g"]),
+            portion_low_g=portion_low_value,
+            portion_high_g=portion_high_value,
+            identification_confidence=optional_confidence("identification_confidence"),
+            portion_confidence=optional_confidence("portion_confidence"),
+            evidence=evidence,
         )
 
     def scaled(self, factor: float) -> "MealItemEstimate":
@@ -99,6 +132,11 @@ class MealItemEstimate:
             protein_g=self.protein_g * factor,
             carbs_g=self.carbs_g * factor,
             fat_g=self.fat_g * factor,
+            portion_low_g=self.portion_low_g * factor if self.portion_low_g is not None else None,
+            portion_high_g=self.portion_high_g * factor if self.portion_high_g is not None else None,
+            identification_confidence=self.identification_confidence,
+            portion_confidence=self.portion_confidence,
+            evidence=self.evidence,
         )
 
 
@@ -116,6 +154,14 @@ class MealEstimate:
     total_high: Optional[MacroTotal] = None
     variance_drivers: List[str] = field(default_factory=list)
     metrics_event_id: Optional[str] = None
+    identification_confidence: Optional[float] = None
+    portion_confidence: Optional[float] = None
+    macro_confidence: Optional[float] = None
+    item_breakdown_complete: bool = True
+    model_reported_total: Optional[MacroTotal] = None
+    item_derived_total: Optional[MacroTotal] = None
+    reconciliation_status: str = "not_evaluated"
+    follow_up_question: Optional[str] = None
 
     @property
     def total_best(self) -> MacroTotal:
@@ -160,6 +206,21 @@ class MealEstimate:
             raise ValueError("variance_drivers must be a list")
         variance_drivers = [str(item) for item in variance_drivers_payload]
 
+        def optional_confidence(name: str) -> Optional[float]:
+            value = payload.get(name)
+            if value is None or value == "":
+                return None
+            confidence_value = float(value)
+            if confidence_value < 0 or confidence_value > 1:
+                raise ValueError(f"{name} must be within [0,1]")
+            return confidence_value
+
+        model_reported_payload = payload.get("model_reported_total")
+        item_derived_payload = payload.get("item_derived_total")
+        breakdown_complete = payload.get("item_breakdown_complete", True)
+        if not isinstance(breakdown_complete, bool):
+            raise ValueError("item_breakdown_complete must be boolean")
+
         return cls(
             meal_name=str(payload["meal_name"]),
             calories=float(payload["calories"]),
@@ -173,6 +234,14 @@ class MealEstimate:
             total_high=total_high,
             variance_drivers=variance_drivers,
             metrics_event_id=str(payload.get("metrics_event_id", "") or "") or None,
+            identification_confidence=optional_confidence("identification_confidence"),
+            portion_confidence=optional_confidence("portion_confidence"),
+            macro_confidence=optional_confidence("macro_confidence"),
+            item_breakdown_complete=breakdown_complete,
+            model_reported_total=(MacroTotal.from_payload(model_reported_payload) if isinstance(model_reported_payload, dict) else None),
+            item_derived_total=(MacroTotal.from_payload(item_derived_payload) if isinstance(item_derived_payload, dict) else None),
+            reconciliation_status=str(payload.get("reconciliation_status", "not_evaluated") or "not_evaluated"),
+            follow_up_question=str(payload.get("follow_up_question", "") or "") or None,
         )
 
     def scaled(self, factor: float) -> "MealEstimate":
@@ -189,6 +258,14 @@ class MealEstimate:
             total_high=self.total_high.scaled(factor) if self.total_high else None,
             variance_drivers=list(self.variance_drivers),
             metrics_event_id=self.metrics_event_id,
+            identification_confidence=self.identification_confidence,
+            portion_confidence=self.portion_confidence,
+            macro_confidence=self.macro_confidence,
+            item_breakdown_complete=self.item_breakdown_complete,
+            model_reported_total=self.model_reported_total.scaled(factor) if self.model_reported_total else None,
+            item_derived_total=self.item_derived_total.scaled(factor) if self.item_derived_total else None,
+            reconciliation_status=self.reconciliation_status,
+            follow_up_question=self.follow_up_question,
         )
 
     def assumptions_summary(self, max_chars: int = 120) -> str:

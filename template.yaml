@@ -75,7 +75,7 @@ Resources:
     Properties:
       CodeUri: lambda_handlers/runtime
       Handler: worker.handler
-      Timeout: 30
+      Timeout: 120
       Role: !GetAtt WorkerExecutionRole.Arn
       Events:
         TelegramEvents:
@@ -181,7 +181,7 @@ Resources:
       QueueName: !Sub tg-macros-${EnvironmentName}-events.fifo
       FifoQueue: true
       ContentBasedDeduplication: false
-      VisibilityTimeout: 120
+      VisibilityTimeout: 300
       MessageRetentionPeriod: 345600
       RedrivePolicy:
         deadLetterTargetArn: !GetAtt TelegramEventsDLQ.Arn

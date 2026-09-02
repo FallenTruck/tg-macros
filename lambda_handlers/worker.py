@@ -3,12 +3,15 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import io
 import json
 import logging
 import os
+import secrets
 import time
 from collections.abc import Mapping
+from dataclasses import dataclass
 from typing import Any, Dict, Optional
 
 from macro_bot.direct_estimator import DirectEstimationError, DirectOpenAIEstimator
@@ -33,6 +36,43 @@ logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
 
 _secret_cache = SSMParameterCache()
+IDEMPOTENCY_LEASE_SECONDS = 240
+IDEMPOTENCY_RECORD_TTL_SECONDS = 86400
+
+
+@dataclass(frozen=True)
+class IdempotencyClaim:
+    claimed: bool
+    attempt_count: int = 0
+    claim_token: Optional[str] = None
+    reason: str = "duplicate"
+
+
+def _fingerprint(value: Any) -> str:
+    if value is None or value == "":
+        return "none"
+    return hashlib.sha256(str(value).encode("utf-8")).hexdigest()[:12]
+
+
+def _log_stage(
+    update_id: int,
+    user_id: Any,
+    stage: str,
+    duration_ms: int,
+    attempt: int = 1,
+    result: str = "success",
+    error_category: Optional[str] = None,
+) -> None:
+    logger.info(
+        "worker_stage update_id=%s user_fingerprint=%s stage=%s duration_ms=%s attempt=%s result=%s error_category=%s",
+        update_id,
+        _fingerprint(user_id),
+        stage,
+        max(0, int(duration_ms)),
+        int(attempt),
+        result,
+        error_category or "none",
+    )
 
 
 class NonRetryableUpdate(ValueError):
@@ -45,19 +85,50 @@ def _dynamodb():
     return boto3.client("dynamodb")
 
 
-def claim_idempotency(
+def _idempotency_key(update_id: int, source: str) -> dict[str, dict[str, str]]:
+    return {
+        "PK": {"S": f"TELEGRAM_UPDATE#{source}#{update_id}"},
+        "SK": {"S": "RECORD"},
+    }
+
+
+def _get_idempotency_record(client: Any, table_name: str, update_id: int, source: str) -> Optional[dict[str, Any]]:
+    response = client.get_item(
+        TableName=table_name,
+        Key=_idempotency_key(update_id, source),
+        ConsistentRead=True,
+    )
+    return response.get("Item") if isinstance(response, Mapping) else None
+
+
+def _number_attribute(item: Mapping[str, Any], name: str, default: int = 0) -> int:
+    value = item.get(name)
+    if isinstance(value, Mapping):
+        value = value.get("N")
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return default
+
+
+def claim_idempotency_result(
     client: Any,
     table_name: str,
     update_id: int,
     user_id: Any = None,
     source: str = "foundation",
-) -> bool:
+    lease_seconds: int = IDEMPOTENCY_LEASE_SECONDS,
+) -> IdempotencyClaim:
     now = int(time.time())
+    claim_token = secrets.token_urlsafe(18)
     item = {
         "PK": {"S": f"TELEGRAM_UPDATE#{source}#{update_id}"},
         "SK": {"S": "RECORD"},
         "status": {"S": "processing"},
         "started_at": {"N": str(now)},
+        "lease_expires_at": {"N": str(now + int(lease_seconds))},
+        "attempt_count": {"N": "1"},
+        "claim_token": {"S": claim_token},
         "expires_at": {"N": str(now + 86400)},
     }
     if user_id is not None:
@@ -68,41 +139,118 @@ def claim_idempotency(
             Item=item,
             ConditionExpression="attribute_not_exists(PK)",
         )
-        return True
+        return IdempotencyClaim(True, 1, claim_token, "claimed")
     except client.exceptions.ConditionalCheckFailedException:
-        return False
+        existing = _get_idempotency_record(client, table_name, update_id, source)
+        if not existing:
+            return IdempotencyClaim(False, 0, None, "missing_after_conflict")
+        status = str(existing.get("status", {}).get("S", ""))
+        if status == "completed":
+            return IdempotencyClaim(False, _number_attribute(existing, "attempt_count"), None, "completed")
+        if status != "processing":
+            return IdempotencyClaim(False, _number_attribute(existing, "attempt_count"), None, "terminal")
+        lease_expires_at = _number_attribute(existing, "lease_expires_at", 0)
+        if lease_expires_at > now:
+            return IdempotencyClaim(False, _number_attribute(existing, "attempt_count"), None, "lease_active")
+
+        attempt_count = _number_attribute(existing, "attempt_count") + 1
+        try:
+            client.update_item(
+                TableName=table_name,
+                Key=_idempotency_key(update_id, source),
+                UpdateExpression=(
+                    "SET #status = :processing, started_at = :started_at, "
+                    "last_attempt_at = :last_attempt_at, lease_expires_at = :lease_expires_at, "
+                    "claim_token = :claim_token, expires_at = :expires_at "
+                    "ADD attempt_count :one"
+                ),
+                ConditionExpression=(
+                    "#status = :processing AND "
+                    "(attribute_not_exists(lease_expires_at) OR lease_expires_at <= :now)"
+                ),
+                ExpressionAttributeNames={"#status": "status"},
+                ExpressionAttributeValues={
+                    ":processing": {"S": "processing"},
+                    ":started_at": {"N": str(now)},
+                    ":last_attempt_at": {"N": str(now)},
+                    ":lease_expires_at": {"N": str(now + int(lease_seconds))},
+                    ":claim_token": {"S": claim_token},
+                    ":expires_at": {"N": str(now + IDEMPOTENCY_RECORD_TTL_SECONDS)},
+                    ":now": {"N": str(now)},
+                    ":one": {"N": "1"},
+                },
+            )
+            return IdempotencyClaim(True, attempt_count, claim_token, "reclaimed")
+        except client.exceptions.ConditionalCheckFailedException:
+            return IdempotencyClaim(False, attempt_count, None, "reclaim_lost_race")
 
 
-def complete_idempotency(client: Any, table_name: str, update_id: int, source: str = "foundation") -> None:
+def claim_idempotency(
+    client: Any,
+    table_name: str,
+    update_id: int,
+    user_id: Any = None,
+    source: str = "foundation",
+) -> bool:
+    """Backward-compatible boolean wrapper around lease-aware claiming."""
+
+    return bool(claim_idempotency_result(client, table_name, update_id, user_id, source).claimed)
+
+
+def complete_idempotency(
+    client: Any,
+    table_name: str,
+    update_id: int,
+    source: str = "foundation",
+    claim_token: Optional[str] = None,
+    reason: str = "completed",
+) -> None:
+    condition = "#status = :processing"
+    values = {
+        ":processing": {"S": "processing"},
+        ":completed": {"S": "completed"},
+        ":completed_at": {"N": str(int(time.time()))},
+        ":reason": {"S": str(reason)},
+    }
+    if claim_token:
+        condition += " AND claim_token = :claim_token"
+        values[":claim_token"] = {"S": claim_token}
     client.update_item(
         TableName=table_name,
-        Key={
-            "PK": {"S": f"TELEGRAM_UPDATE#{source}#{update_id}"},
-            "SK": {"S": "RECORD"},
-        },
-        UpdateExpression="SET #status = :completed, completed_at = :completed_at",
-        ConditionExpression="#status = :processing",
+        Key=_idempotency_key(update_id, source),
+        UpdateExpression="SET #status = :completed, completed_at = :completed_at, completion_reason = :reason REMOVE lease_expires_at",
+        ConditionExpression=condition,
         ExpressionAttributeNames={"#status": "status"},
-        ExpressionAttributeValues={
-            ":processing": {"S": "processing"},
-            ":completed": {"S": "completed"},
-            ":completed_at": {"N": str(int(time.time()))},
-        },
+        ExpressionAttributeValues=values,
     )
 
 
-def release_idempotency(client: Any, table_name: str, update_id: int, source: str = "telegram") -> None:
-    """Release a claimed update so a transient failure can be retried."""
+def release_idempotency(
+    client: Any,
+    table_name: str,
+    update_id: int,
+    source: str = "telegram",
+    claim_token: Optional[str] = None,
+    error_category: str = "retryable_failure",
+) -> None:
+    """Expire the current lease without falsely completing the update."""
 
-    client.delete_item(
+    condition = "#status = :processing"
+    values = {
+        ":processing": {"S": "processing"},
+        ":now": {"N": str(int(time.time()))},
+        ":error_category": {"S": str(error_category)},
+    }
+    if claim_token:
+        condition += " AND claim_token = :claim_token"
+        values[":claim_token"] = {"S": claim_token}
+    client.update_item(
         TableName=table_name,
-        Key={
-            "PK": {"S": f"TELEGRAM_UPDATE#{source}#{update_id}"},
-            "SK": {"S": "RECORD"},
-        },
-        ConditionExpression="#status = :processing",
+        Key=_idempotency_key(update_id, source),
+        UpdateExpression="SET lease_expires_at = :now, last_error_category = :error_category, last_error_at = :now",
+        ConditionExpression=condition,
         ExpressionAttributeNames={"#status": "status"},
-        ExpressionAttributeValues={":processing": {"S": "processing"}},
+        ExpressionAttributeValues=values,
     )
 
 
@@ -216,6 +364,7 @@ async def _handle_photo(
     message: Mapping[str, Any],
     update_id: int,
     estimator: Any,
+    attempt: int = 1,
 ) -> None:
     photos = message.get("photo")
     if not isinstance(photos, list) or not photos:
@@ -244,13 +393,66 @@ async def _handle_photo(
             if sent_message_id is not None:
                 service.set_action_message_id(identity, prior_action.token, int(sent_message_id))
         return
-    telegram_file = await bot.get_file(photo["file_id"])
+    stage_started = time.monotonic()
+    try:
+        telegram_file = await bot.get_file(photo["file_id"])
+    except Exception as err:
+        _log_stage(
+            update_id,
+            identity.user_id,
+            "telegram_file_metadata",
+            round((time.monotonic() - stage_started) * 1000),
+            attempt=attempt,
+            result="failure",
+            error_category=type(err).__name__,
+        )
+        raise
+    _log_stage(
+        update_id,
+        identity.user_id,
+        "telegram_file_metadata",
+        round((time.monotonic() - stage_started) * 1000),
+        attempt=attempt,
+    )
     output = io.BytesIO()
-    await telegram_file.download_to_memory(out=output)
+    stage_started = time.monotonic()
+    try:
+        await telegram_file.download_to_memory(out=output)
+    except Exception as err:
+        _log_stage(
+            update_id,
+            identity.user_id,
+            "telegram_image_download",
+            round((time.monotonic() - stage_started) * 1000),
+            attempt=attempt,
+            result="failure",
+            error_category=type(err).__name__,
+        )
+        raise
+    _log_stage(
+        update_id,
+        identity.user_id,
+        "telegram_image_download",
+        round((time.monotonic() - stage_started) * 1000),
+        attempt=attempt,
+    )
     image_bytes = output.getvalue()
     caption = str(message.get("caption", "") or "")[:1000]
     persona_hint = service.persona_hint(identity, caption)
+    def estimator_telemetry(stage: str, duration_ms: int, result: str, stage_attempt: Optional[int], error_category: Optional[str]) -> None:
+        _log_stage(
+            update_id,
+            identity.user_id,
+            stage,
+            duration_ms,
+            attempt=stage_attempt or attempt,
+            result=result,
+            error_category=error_category,
+        )
+
     try:
+        if hasattr(estimator, "_telemetry_callback"):
+            estimator._telemetry_callback = estimator_telemetry
         estimation = await estimator.estimate(image_bytes, caption=caption, persona_hint=persona_hint)
     except DirectEstimationError as err:
         if getattr(err, "retryable", True):
@@ -265,20 +467,64 @@ async def _handle_photo(
         eaten_at = parse_utc(selected_datetime)
     else:
         eaten_at = service.current_local_now_utc(identity)
-    action = service.create_pending_meal(
-        identity,
-        chat_id=chat_id,
-        request_message_id=request_message_id,
-        caption=caption,
-        estimate=estimation.estimate,
-        eaten_at=eaten_at,
-        username=identity.username,
-        update_id=update_id,
-        model_metadata={"model": estimation.model, "usage": estimation.usage},
+    stage_started = time.monotonic()
+    try:
+        action = service.create_pending_meal(
+            identity,
+            chat_id=chat_id,
+            request_message_id=request_message_id,
+            caption=caption,
+            estimate=estimation.estimate,
+            eaten_at=eaten_at,
+            username=identity.username,
+            update_id=update_id,
+            model_metadata={"model": estimation.model, "usage": estimation.usage},
+            telegram_file_id=str(photo.get("file_id") or "") or None,
+            telegram_file_unique_id=str(photo.get("file_unique_id") or "") or None,
+            telegram_message_id=request_message_id,
+        )
+    except Exception as err:
+        _log_stage(
+            update_id,
+            identity.user_id,
+            "pending_meal_persistence",
+            round((time.monotonic() - stage_started) * 1000),
+            attempt=attempt,
+            result="failure",
+            error_category=type(err).__name__,
+        )
+        raise
+    _log_stage(
+        update_id,
+        identity.user_id,
+        "pending_meal_persistence",
+        round((time.monotonic() - stage_started) * 1000),
+        attempt=attempt,
     )
     # Clear the selected time only after the meal/action transaction succeeds.
     service.consume_meal_datetime(identity)
-    sent = await _send(bot, chat_id, format_pending_message(action), build_meal_keyboard(action.token))
+    _log_stage(update_id, identity.user_id, "telegram_reply", 0, attempt=attempt, result="started")
+    stage_started = time.monotonic()
+    try:
+        sent = await _send(bot, chat_id, format_pending_message(action), build_meal_keyboard(action.token))
+    except Exception as err:
+        _log_stage(
+            update_id,
+            identity.user_id,
+            "telegram_reply",
+            round((time.monotonic() - stage_started) * 1000),
+            attempt=attempt,
+            result="failure",
+            error_category=type(err).__name__,
+        )
+        raise
+    _log_stage(
+        update_id,
+        identity.user_id,
+        "telegram_reply",
+        round((time.monotonic() - stage_started) * 1000),
+        attempt=attempt,
+    )
     sent_message_id = getattr(sent, "message_id", None)
     if sent_message_id is None and isinstance(sent, Mapping):
         sent_message_id = sent.get("message_id")
@@ -345,7 +591,14 @@ async def _handle_callback(service: NutritionService, identity: Any, bot: Any, u
                 await _handle_recommendation(service, identity, bot, chat_id)
 
 
-async def process_update_message(message: Mapping[str, Any], *, service: Any = None, bot: Any = None, estimator: Any = None) -> None:
+async def process_update_message(
+    message: Mapping[str, Any],
+    *,
+    service: Any = None,
+    bot: Any = None,
+    estimator: Any = None,
+    attempt: int = 1,
+) -> None:
     update = message.get("payload") if isinstance(message, Mapping) else None
     if not isinstance(update, Mapping):
         raise NonRetryableUpdate("Telegram update payload is malformed")
@@ -357,12 +610,32 @@ async def process_update_message(message: Mapping[str, Any], *, service: Any = N
     service = service or _service()
     bot = bot or _bot()
     estimator = estimator or _estimator()
-    identity = service.resolve_user(
-        user["telegram_user_id"],
-        username=user["username"],
-        display_name=user["display_name"],
-    )
     update_id = int(message["update_id"])
+    stage_started = time.monotonic()
+    try:
+        identity = service.resolve_user(
+            user["telegram_user_id"],
+            username=user["username"],
+            display_name=user["display_name"],
+        )
+    except Exception as err:
+        _log_stage(
+            update_id,
+            user["telegram_user_id"],
+            "identity_resolution",
+            round((time.monotonic() - stage_started) * 1000),
+            attempt=attempt,
+            result="failure",
+            error_category=type(err).__name__,
+        )
+        raise
+    _log_stage(
+        update_id,
+        identity.user_id,
+        "identity_resolution",
+        round((time.monotonic() - stage_started) * 1000),
+        attempt=attempt,
+    )
     if isinstance(update.get("callback_query"), Mapping):
         await _handle_callback(service, identity, bot, update)
         return
@@ -385,7 +658,7 @@ async def process_update_message(message: Mapping[str, Any], *, service: Any = N
         await _handle_recommendation(service, identity, bot, chat_id)
         return
     if message_payload.get("photo"):
-        await _handle_photo(service, identity, bot, message_payload, update_id, estimator)
+        await _handle_photo(service, identity, bot, message_payload, update_id, estimator, attempt=attempt)
         return
     workflow = service.repository.get_workflow(identity.user_id)
     if workflow and workflow.get("state") == "awaiting_datetime" and text:
@@ -408,28 +681,49 @@ def handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
         message_id = str(record.get("messageId", ""))
         update_id: Optional[int] = None
         claimed = False
+        claim: Optional[IdempotencyClaim] = None
         try:
             message = _record_from_sqs(record)
             update_id = int(message["update_id"])
             payload = message.get("payload")
             if isinstance(payload, Mapping) and payload.get("foundation_test_behavior") == "fail":
                 raise RuntimeError("intentional foundation retry test failure")
-            claimed = claim_idempotency(
+            claim = claim_idempotency_result(
                 client,
                 table_name,
                 update_id,
                 message.get("telegram_user_id"),
                 source="telegram",
             )
+            claimed = claim.claimed
             if not claimed:
-                logger.info("worker_duplicate update_id=%s", update_id)
+                logger.info(
+                    "worker_duplicate update_id=%s reason=%s attempt=%s",
+                    update_id,
+                    claim.reason,
+                    claim.attempt_count,
+                )
                 continue
-            asyncio.run(process_update_message(message))
-            complete_idempotency(client, table_name, update_id, source="telegram")
-            logger.info("worker_acknowledged update_id=%s", update_id)
+            logger.info("worker_idempotency_claimed update_id=%s attempt=%s", update_id, claim.attempt_count)
+            asyncio.run(process_update_message(message, attempt=claim.attempt_count))
+            complete_idempotency(
+                client,
+                table_name,
+                update_id,
+                source="telegram",
+                claim_token=claim.claim_token,
+            )
+            logger.info("worker_acknowledged update_id=%s attempt=%s", update_id, claim.attempt_count)
         except NonRetryableUpdate:
             if claimed and update_id is not None:
-                complete_idempotency(client, table_name, update_id, source="telegram")
+                complete_idempotency(
+                    client,
+                    table_name,
+                    update_id,
+                    source="telegram",
+                    claim_token=claim.claim_token if claim else None,
+                    reason="non_retryable",
+                )
             logger.info("worker_input_rejected message_id=%s", message_id)
         except Exception as err:
             # External SDK exceptions can contain request URLs or payload
@@ -437,7 +731,14 @@ def handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
             logger.error("worker_record_failed message_id=%s error_type=%s", message_id, type(err).__name__)
             if claimed and update_id is not None:
                 try:
-                    release_idempotency(client, table_name, update_id, source="telegram")
+                    release_idempotency(
+                        client,
+                        table_name,
+                        update_id,
+                        source="telegram",
+                        claim_token=claim.claim_token if claim else None,
+                        error_category=type(err).__name__,
+                    )
                 except Exception as err:
                     logger.error("worker_idempotency_release_failed update_id=%s error_type=%s", update_id, type(err).__name__)
             failures.append({"itemIdentifier": message_id})

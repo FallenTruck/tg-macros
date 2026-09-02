@@ -73,6 +73,7 @@ class _FakeWorkerService:
         self.workflow = None
         self.action = None
         self.calls = []
+        self.create_kwargs = None
 
         class Repo:
             def __init__(self, owner):
@@ -114,6 +115,7 @@ class _FakeWorkerService:
         return None
 
     def create_pending_meal(self, identity, **kwargs):
+        self.create_kwargs = kwargs
         self.action = PendingMealAction(
             token="secure-token",
             chat_id=kwargs["chat_id"],
@@ -201,20 +203,29 @@ class ServerlessAdapterTests(unittest.TestCase):
         )
         self.assertEqual(service.workflow["state"], "datetime_selected")
         service.workflow = None
-        asyncio.run(
-            process_update_message(
-                {
-                    "update_id": 3,
-                    "payload": {"message": {"message_id": 12, "chat": {"id": 99}, "from": {"id": 101}, "photo": [{"file_id": "photo-1"}], "caption": "rice bowl"}},
-                },
-                service=service,
-                bot=bot,
-                estimator=estimator,
+        with self.assertLogs("lambda_handlers.worker", level="INFO") as captured:
+            asyncio.run(
+                process_update_message(
+                    {
+                        "update_id": 3,
+                    "payload": {"message": {"message_id": 12, "chat": {"id": 99}, "from": {"id": 101}, "photo": [{"file_id": "photo-1", "file_unique_id": "unique-photo-1"}], "caption": "rice bowl"}},
+                    },
+                    service=service,
+                    bot=bot,
+                    estimator=estimator,
+                )
             )
-        )
         self.assertIsNotNone(service.action)
         self.assertIn("Macro estimate", bot.sent[-1]["text"])
         self.assertEqual(bot.sent[-1]["reply_markup"].inline_keyboard[0][0].callback_data, "meal:v1:confirm:secure-token")
+        self.assertEqual(service.create_kwargs["telegram_file_id"], "photo-1")
+        self.assertEqual(service.create_kwargs["telegram_file_unique_id"], "unique-photo-1")
+        self.assertEqual(service.create_kwargs["telegram_message_id"], 12)
+        log_text = "\n".join(captured.output)
+        for stage in ("identity_resolution", "telegram_file_metadata", "telegram_image_download", "pending_meal_persistence", "telegram_reply"):
+            self.assertIn(f"stage={stage}", log_text)
+        self.assertIn("user_fingerprint=", log_text)
+        self.assertNotIn("telegram_user_id=101", log_text)
 
     def test_openapp_uses_deployed_mini_app_url(self):
         service = _FakeWorkerService()

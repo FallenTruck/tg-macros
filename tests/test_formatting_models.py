@@ -62,6 +62,25 @@ class FormattingAndModelTests(unittest.TestCase):
         self.assertIn("Range:", message)
         self.assertIn("Assumptions:", message)
 
+    def test_formatting_surfaces_uncertainty_and_deterministic_follow_up(self):
+        estimate = MealEstimate(
+            meal_name="Covered noodle bowl",
+            calories=650,
+            protein_g=40,
+            carbs_g=70,
+            fat_g=20,
+            confidence=0.55,
+            notes="hidden base",
+            total_low=MacroTotal(500, 30, 50, 14),
+            total_high=MacroTotal(850, 55, 100, 32),
+            variance_drivers=["hidden base", "sauce quantity"],
+            follow_up_question="Is there noodles or rice underneath?",
+        )
+
+        message = format_macro_message(estimate)
+        self.assertIn("Main uncertainty: hidden base; sauce quantity", message)
+        self.assertIn("Quick check: Is there noodles or rice underneath?", message)
+
     def test_recommendation_formatting(self):
         result = RecommendationResult(
             summary="Today so far: 1200 kcal. Remaining: 900 kcal, 60g protein, 110g carbs, 25g fat.",
