@@ -32,6 +32,9 @@ class TelegramUser:
     telegram_user_id: int
     username: str
     display_name: str
+    start_param: str = ""
+    chat_type: str = ""
+    chat_instance: str = ""
 
     def to_payload(self) -> dict[str, Any]:
         return {
@@ -111,7 +114,14 @@ def validate_init_data(
     last_name = str(user.get("last_name", "") or "").strip()
     display_name = " ".join(part for part in (first_name, last_name) if part).strip()
     display_name = display_name or username or str(telegram_user_id)
-    return TelegramUser(telegram_user_id, username, display_name)
+    return TelegramUser(
+        telegram_user_id,
+        username,
+        display_name,
+        start_param=str(parsed.get("start_param", "") or "").strip(),
+        chat_type=str(parsed.get("chat_type", "") or "").strip(),
+        chat_instance=str(parsed.get("chat_instance", "") or "").strip(),
+    )
 
 
 class SSMParameterCache:

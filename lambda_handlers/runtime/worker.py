@@ -16,8 +16,10 @@ from typing import Any, Dict, Optional
 
 from macro_bot.direct_estimator import DirectEstimationError, DirectOpenAIEstimator
 from macro_bot.formatting import (
+    build_direct_setup_keyboard,
     build_meal_keyboard,
     build_setup_keyboard,
+    build_mini_app_direct_link,
     format_pending_message,
     format_profile_setup_message,
     format_recommendation_message,
@@ -312,6 +314,13 @@ def _chat_id(message: Mapping[str, Any]) -> Optional[int]:
     return value
 
 
+def _chat_type(message: Mapping[str, Any]) -> str:
+    chat = message.get("chat")
+    if not isinstance(chat, Mapping):
+        return ""
+    return str(chat.get("type", "") or "").strip().lower()
+
+
 def _message_id(message: Mapping[str, Any]) -> int:
     try:
         return int(message.get("message_id", 0) or 0)
@@ -345,6 +354,48 @@ def _estimator() -> DirectOpenAIEstimator:
 
 async def _send(bot: Any, chat_id: int, text: str, reply_markup: Any = None) -> Any:
     return await bot.send_message(chat_id=chat_id, text=text, reply_markup=reply_markup)
+
+
+async def _bot_username(bot: Any) -> str:
+    configured = os.getenv("BOT_USERNAME", "").strip().lstrip("@")
+    if configured:
+        return configured
+    bot_user = await bot.get_me()
+    username = getattr(bot_user, "username", None)
+    if username is None and isinstance(bot_user, Mapping):
+        username = bot_user.get("username")
+    username = str(username or "").strip().lstrip("@")
+    if not username:
+        raise RuntimeError("Telegram bot username is unavailable")
+    return username
+
+
+async def _handle_openapp(
+    service: NutritionService,
+    identity: Any,
+    bot: Any,
+    message: Mapping[str, Any],
+    update_id: int,
+) -> None:
+    chat_id = _chat_id(message)
+    if chat_id is None:
+        raise NonRetryableUpdate("openapp message has no chat")
+    bot_username = await _bot_username(bot)
+    launch_token = secrets.token_urlsafe(18)
+    service.create_mini_app_launch(
+        launch_token,
+        identity=identity,
+        chat_id=chat_id,
+        chat_type=_chat_type(message),
+        message_id=_message_id(message),
+    )
+    direct_link = build_mini_app_direct_link(bot_username, launch_token)
+    await _send(
+        bot,
+        chat_id,
+        format_profile_setup_message(direct_link),
+        build_direct_setup_keyboard(direct_link),
+    )
 
 
 async def _handle_recommendation(service: NutritionService, identity: Any, bot: Any, chat_id: int) -> None:
@@ -651,8 +702,7 @@ async def process_update_message(
         await _send(bot, chat_id, "Send meal date/time in this format: DD-MM-YYYY HH:MM")
         return
     if command == "/openapp":
-        url = os.getenv("MINI_APP_URL", "").strip()
-        await _send(bot, chat_id, format_profile_setup_message(url), build_setup_keyboard(url))
+        await _handle_openapp(service, identity, bot, message_payload, update_id)
         return
     if command == "/suggestmeal":
         await _handle_recommendation(service, identity, bot, chat_id)

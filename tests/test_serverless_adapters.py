@@ -22,6 +22,16 @@ class _FakeApiService:
     def __init__(self):
         self.identity = ServerlessIdentity(101, "internal-a", "a", "A", "now", "now")
         self.saved_payload = None
+        self.launches = {}
+
+        class Repo:
+            def __init__(self, owner):
+                self.owner = owner
+
+            def get_mini_app_launch(self, token):
+                return self.owner.launches.get(token)
+
+        self.repository = Repo(self)
 
     def resolve_user(self, telegram_user_id, username, display_name):
         self.identity = ServerlessIdentity(telegram_user_id, "internal-a", username, display_name, "now", "now")
@@ -51,6 +61,9 @@ class _FakeBot:
         self.answers = []
         self.next_message_id = 500
 
+    async def get_me(self):
+        return SimpleNamespace(username="javaanfitnessbot")
+
     async def send_message(self, **kwargs):
         self.sent.append(kwargs)
         result = SimpleNamespace(message_id=self.next_message_id)
@@ -74,6 +87,7 @@ class _FakeWorkerService:
         self.action = None
         self.calls = []
         self.create_kwargs = None
+        self.launch_context = None
 
         class Repo:
             def __init__(self, owner):
@@ -83,6 +97,19 @@ class _FakeWorkerService:
                 return self.owner.workflow
 
         self.repository = Repo(self)
+
+    def create_mini_app_launch(self, token, *, identity, chat_id, chat_type, message_id):
+        self.launch_context = {
+            "token": token,
+            "telegram_user_id": identity.telegram_user_id,
+            "user_id": identity.user_id,
+            "chat_id": chat_id,
+            "chat_type": chat_type,
+            "message_id": message_id,
+            "created_at_epoch": 1_000,
+            "expires_at": 1_900,
+        }
+        return self.launch_context
 
     def resolve_user(self, telegram_user_id, username, display_name):
         self.calls.append(("resolve", telegram_user_id))
@@ -227,7 +254,7 @@ class ServerlessAdapterTests(unittest.TestCase):
         self.assertIn("user_fingerprint=", log_text)
         self.assertNotIn("telegram_user_id=101", log_text)
 
-    def test_openapp_uses_deployed_mini_app_url(self):
+    def test_openapp_group_uses_opaque_mini_app_direct_link_and_persists_context(self):
         service = _FakeWorkerService()
         bot = _FakeBot(_jpg_bytes())
         with patch.dict("os.environ", {"MINI_APP_URL": "https://d1example.cloudfront.net"}, clear=False):
@@ -235,17 +262,73 @@ class ServerlessAdapterTests(unittest.TestCase):
                 process_update_message(
                     {
                         "update_id": 4,
-                        "payload": {"message": {"message_id": 13, "chat": {"id": 99}, "from": {"id": 101}, "text": "/openapp"}},
+                        "payload": {"message": {"message_id": 13, "chat": {"id": -10099, "type": "group"}, "from": {"id": 101}, "text": "/openapp"}},
                     },
                     service=service,
                     bot=bot,
                     estimator=_FakeEstimator(),
                 )
             )
-        self.assertEqual(
-            bot.sent[-1]["reply_markup"].inline_keyboard[0][0].url,
-            "https://d1example.cloudfront.net",
-        )
+        button = bot.sent[-1]["reply_markup"].inline_keyboard[0][0]
+        self.assertIsNone(button.web_app)
+        self.assertRegex(button.url, r"^https://t\.me/javaanfitnessbot\?startapp=[A-Za-z0-9_-]+$")
+        self.assertNotIn("d1example.cloudfront.net", button.url)
+        self.assertEqual(service.launch_context["chat_id"], -10099)
+        self.assertEqual(service.launch_context["chat_type"], "group")
+        self.assertEqual(service.launch_context["telegram_user_id"], 101)
+        self.assertEqual(service.launch_context["message_id"], 13)
+        token = button.url.split("startapp=", 1)[1]
+        self.assertEqual(token, service.launch_context["token"])
+        self.assertGreater(service.launch_context["expires_at"], service.launch_context["created_at_epoch"])
+
+    def test_openapp_supports_supergroup_and_private_chat_direct_links(self):
+        for chat_type, chat_id in (("supergroup", -100100), ("private", 101)):
+            with self.subTest(chat_type=chat_type):
+                service = _FakeWorkerService()
+                bot = _FakeBot(_jpg_bytes())
+                asyncio.run(
+                    process_update_message(
+                        {
+                            "update_id": 40 + len(chat_type),
+                            "payload": {"message": {"message_id": 14, "chat": {"id": chat_id, "type": chat_type}, "from": {"id": 101}, "text": "/openapp"}},
+                        },
+                        service=service,
+                        bot=bot,
+                        estimator=_FakeEstimator(),
+                    )
+                )
+                button = bot.sent[-1]["reply_markup"].inline_keyboard[0][0]
+                self.assertIsNone(button.web_app)
+                self.assertTrue(button.url.startswith("https://t.me/javaanfitnessbot?startapp="))
+
+    def test_mini_app_init_data_context_is_user_bound(self):
+        service = _FakeApiService()
+        service.launches["opaque-token"] = {
+            "telegram_user_id": 101,
+            "user_id": "internal-a",
+            "chat_id": -10099,
+            "chat_type": "group",
+            "expires_at": 9_999_999_999,
+            "active": True,
+        }
+        client = TestClient(api.app)
+        valid = _init_data(init_fields={"start_param": "opaque-token", "chat_type": "group", "chat_instance": "opaque-chat"})
+        other_user = _init_data(user_id=202, init_fields={"start_param": "opaque-token", "chat_type": "group", "chat_instance": "opaque-chat"})
+        with patch.object(api, "_service", return_value=service), patch.object(
+            api, "bot_token_from_environment", return_value="test-token"
+        ):
+            self.assertEqual(client.get("/api/profile", headers={"X-Telegram-Init-Data": valid}).status_code, 200)
+            self.assertEqual(client.get("/api/profile", headers={"X-Telegram-Init-Data": other_user}).status_code, 403)
+
+    def test_start_param_without_signed_init_data_does_not_authenticate(self):
+        service = _FakeApiService()
+        service.launches["opaque-token"] = {"telegram_user_id": 101, "user_id": "internal-a", "expires_at": 9_999_999_999, "active": True}
+        client = TestClient(api.app)
+        with patch.object(api, "_service", return_value=service), patch.object(
+            api, "bot_token_from_environment", return_value="test-token"
+        ):
+            response = client.get("/api/profile?start_param=opaque-token")
+        self.assertEqual(response.status_code, 401)
 
 
 if __name__ == "__main__":

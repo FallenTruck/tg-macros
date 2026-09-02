@@ -34,6 +34,7 @@ logger = logging.getLogger(__name__)
 DEFAULT_TIMEZONE = "Asia/Singapore"
 WORKFLOW_TTL_SECONDS = 30 * 60
 ACTION_TTL_SECONDS = 60 * 60
+MINI_APP_LAUNCH_TTL_SECONDS = 15 * 60
 
 
 class DataError(RuntimeError):
@@ -411,6 +412,58 @@ class DynamoNutritionRepository:
         payload["telegram_user_id"] = int(payload.get("telegram_user_id", 0))
         payload["daily_target"] = dict(payload.get("daily_target", {}))
         return UserProfile.from_payload(payload)
+
+    def create_mini_app_launch(
+        self,
+        token: str,
+        *,
+        identity: ServerlessIdentity,
+        chat_id: int,
+        chat_type: str,
+        message_id: int,
+        ttl_seconds: int = MINI_APP_LAUNCH_TTL_SECONDS,
+    ) -> dict[str, Any]:
+        """Persist a short-lived, user-bound Mini App launch context."""
+
+        token = str(token or "").strip()
+        if not token:
+            raise ValueError("Mini App launch token is required")
+        now = self._now()
+        item = {
+            "PK": f"MINIAPP_LAUNCH#{token}",
+            "SK": "META",
+            "entity_type": "miniapp_launch",
+            "launch_token": token,
+            "telegram_user_id": identity.telegram_user_id,
+            "user_id": identity.user_id,
+            "chat_id": int(chat_id),
+            "chat_type": str(chat_type or ""),
+            "message_id": int(message_id),
+            "created_at": utc_iso(now),
+            "expires_at": epoch_seconds(now) + int(ttl_seconds),
+            "active": True,
+        }
+        self.table.put_item(
+            Item=_to_storage(item),
+            ConditionExpression="attribute_not_exists(PK)",
+        )
+        return item
+
+    def get_mini_app_launch(self, token: str) -> Optional[dict[str, Any]]:
+        """Return an active launch context, excluding expired records."""
+
+        token = str(token or "").strip()
+        if not token:
+            return None
+        item = self._get({"PK": f"MINIAPP_LAUNCH#{token}", "SK": "META"})
+        if not item:
+            return None
+        payload = _from_storage(item)
+        if int(payload.get("expires_at", 0) or 0) <= epoch_seconds(self._now()):
+            return None
+        if payload.get("active", True) is False:
+            return None
+        return payload
 
     def save_profile(
         self,

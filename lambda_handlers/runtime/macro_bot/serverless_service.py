@@ -25,6 +25,7 @@ from .serverless_data import (
     ServerlessIdentity,
     StoredMeal,
     local_day_utc_bounds,
+    parse_utc,
     utc_iso,
 )
 
@@ -112,10 +113,30 @@ class NutritionService:
     def resolve_user(self, telegram_user_id: int, username: str = "", display_name: str = "") -> ServerlessIdentity:
         return self.repository.resolve_identity(telegram_user_id, username=username, display_name=display_name)
 
+    def create_mini_app_launch(
+        self,
+        token: str,
+        *,
+        identity: ServerlessIdentity,
+        chat_id: int,
+        chat_type: str,
+        message_id: int,
+    ) -> dict[str, Any]:
+        return self.repository.create_mini_app_launch(
+            token,
+            identity=identity,
+            chat_id=chat_id,
+            chat_type=chat_type,
+            message_id=message_id,
+        )
+
     def profile_response(self, identity: ServerlessIdentity) -> dict[str, Any]:
         profile = self.repository.get_profile(identity.user_id)
+        profile_payload = profile.to_payload() if profile is not None else None
+        if profile_payload is not None:
+            profile_payload["target_effective_at"] = self.current_target_effective_at(identity)
         payload: dict[str, Any] = {
-            "profile": profile.to_payload() if profile is not None else None,
+            "profile": profile_payload,
             "questionnaire_version": "miniapp-v2",
             "viewer": {
                 "telegram_user_id": identity.telegram_user_id,
@@ -127,6 +148,19 @@ class NutritionService:
         if profile is not None:
             payload["timezone"] = profile.timezone
         return payload
+
+    def current_target_effective_at(self, identity: ServerlessIdentity) -> Optional[str]:
+        """Return the effective timestamp of the current target revision."""
+
+        cutoff = self._now()
+        for target in self.repository.list_targets(identity.user_id):
+            effective_at = str(target.get("effective_at", "") or "")
+            try:
+                if effective_at and parse_utc(effective_at) <= cutoff:
+                    return effective_at
+            except (TypeError, ValueError):
+                continue
+        return None
 
     @staticmethod
     def preview_payload(payload: dict[str, Any]) -> dict[str, Any]:

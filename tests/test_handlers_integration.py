@@ -168,10 +168,10 @@ class HandlersIntegrationTests(unittest.IsolatedAsyncioTestCase):
         kwargs = msg.reply_text.await_args.kwargs
         self.assertIn("Open the Mini App in Telegram first.", args[0])
         self.assertIn("https://t.me/javaanfitnessbot?startapp", args[0])
-        self.assertEqual(
-            kwargs["reply_markup"].inline_keyboard[0][0].url,
-            "https://t.me/javaanfitnessbot?startapp",
-        )
+        button = kwargs["reply_markup"].inline_keyboard[0][0]
+        self.assertIsNotNone(button.web_app)
+        self.assertEqual(button.web_app.url, "https://t.me/javaanfitnessbot?startapp")
+        self.assertIsNone(button.url)
 
 
 if __name__ == "__main__":

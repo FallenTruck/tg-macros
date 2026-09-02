@@ -304,9 +304,9 @@ function renderHomeSummary() {
   }
 
   homeSummaryTitle.textContent = `${Math.round(state.profile.daily_target.calories)} kcal target`;
-  homeSummaryMeta.textContent = state.profile.updated_at
-    ? `Saved ${formatIso(state.profile.updated_at)}`
-    : "Saved target";
+  homeSummaryMeta.textContent = state.profile.target_effective_at
+    ? `Effective from ${formatIso(state.profile.target_effective_at)}`
+    : "Effective date unavailable";
   homeSummaryEmpty.hidden = true;
   homeSummaryMacros.hidden = false;
   homeSummaryMacros.innerHTML = compactMacroCards(state.profile.daily_target);
@@ -325,9 +325,9 @@ function renderProfileSummary() {
   }
 
   profileSummaryTitle.textContent = "Saved macro target";
-  profileMeta.textContent = state.profile.updated_at
-    ? `Updated ${formatIso(state.profile.updated_at)}`
-    : "Saved target";
+  profileMeta.textContent = state.profile.target_effective_at
+    ? `Effective from ${formatIso(state.profile.target_effective_at)}`
+    : "Effective date unavailable";
   profileEmpty.hidden = true;
   profileMacros.hidden = false;
   profileMacros.innerHTML = macroCards(state.profile.daily_target);

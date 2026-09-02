@@ -1,6 +1,7 @@
 from datetime import datetime
+from urllib.parse import quote
 
-from telegram import InlineKeyboardButton, InlineKeyboardMarkup
+from telegram import InlineKeyboardButton, InlineKeyboardMarkup, WebAppInfo
 
 from .models import MealEstimate, PendingMealAction, RecommendationResult
 
@@ -23,8 +24,26 @@ def build_meal_keyboard(token: str) -> InlineKeyboardMarkup:
 
 def build_setup_keyboard(url: str) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(
+        [[InlineKeyboardButton("Open Nutrition Workspace", web_app=WebAppInfo(url=url))]]
+    )
+
+
+def build_direct_setup_keyboard(url: str) -> InlineKeyboardMarkup:
+    """Build the group-safe button for a Telegram Mini App deep link."""
+
+    return InlineKeyboardMarkup(
         [[InlineKeyboardButton("Open Nutrition Workspace", url=url)]]
     )
+
+
+def build_mini_app_direct_link(bot_username: str, launch_token: str) -> str:
+    """Return a Main Mini App deep link carrying only an opaque token."""
+
+    username = str(bot_username or "").strip().lstrip("@")
+    token = str(launch_token or "").strip()
+    if not username or not token:
+        raise ValueError("bot username and launch token are required")
+    return f"https://t.me/{quote(username, safe='')}?startapp={quote(token, safe='')}"
 
 
 def format_macro_message(estimate: MealEstimate) -> str:

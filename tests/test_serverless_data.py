@@ -11,6 +11,7 @@ from macro_bot.serverless_data import (
     DynamoNutritionRepository,
     local_day_utc_bounds,
 )
+from macro_bot.serverless_service import NutritionService
 
 
 class ConditionalCheckFailedException(Exception):
@@ -240,6 +241,53 @@ class ServerlessDataTests(unittest.TestCase):
         self.now = datetime(2026, 1, 15, 12, tzinfo=timezone.utc)
         self.table = _FakeTable()
         self.repo = DynamoNutritionRepository(self.table, table_name="fitness", now_fn=lambda: self.now)
+
+    def test_mini_app_launch_context_is_ttl_bound_and_user_bound(self):
+        identity = self.repo.resolve_identity(101, "u", "User")
+        context = self.repo.create_mini_app_launch(
+            "opaque-token",
+            identity=identity,
+            chat_id=-10099,
+            chat_type="supergroup",
+            message_id=77,
+            ttl_seconds=900,
+        )
+        self.assertEqual(context["PK"], "MINIAPP_LAUNCH#opaque-token")
+        self.assertEqual(context["SK"], "META")
+        self.assertEqual(context["chat_id"], -10099)
+        self.assertEqual(context["chat_type"], "supergroup")
+        self.assertEqual(self.repo.get_mini_app_launch("opaque-token")["user_id"], identity.user_id)
+        self.assertEqual(self.repo.get_mini_app_launch("missing"), None)
+
+    def test_expired_mini_app_launch_context_is_not_returned(self):
+        identity = self.repo.resolve_identity(101, "u", "User")
+        self.repo.create_mini_app_launch(
+            "expired-token",
+            identity=identity,
+            chat_id=-10099,
+            chat_type="group",
+            message_id=77,
+            ttl_seconds=0,
+        )
+        self.assertIsNone(self.repo.get_mini_app_launch("expired-token"))
+
+    def test_profile_response_exposes_target_effective_at_not_profile_updated_at(self):
+        identity = self.repo.resolve_identity(101, "u", "User")
+        answers = QuestionnaireAnswers("male", 30, 180, 80, "moderate", "maintain")
+        profile = UserProfile(
+            101,
+            "u",
+            "User",
+            MacroTotal(2200, 140, 230, 80),
+            answers,
+            created_at="2026-01-01T00:00:00Z",
+            updated_at="2026-01-15T12:00:00Z",
+        )
+        self.repo.save_profile(identity, profile, effective_at=datetime(2025, 12, 1, tzinfo=timezone.utc))
+        response = NutritionService(self.repo).profile_response(identity)
+        self.assertEqual(response["profile"]["target_effective_at"], "2025-12-01T00:00:00Z")
+        self.assertEqual(response["profile"]["updated_at"], "2026-01-15T12:00:00Z")
+        self.assertNotEqual(response["profile"]["target_effective_at"], response["profile"]["updated_at"])
 
     def test_identity_creation_is_idempotent_and_metadata_is_mutable(self):
         first = self.repo.resolve_identity(101, "old_name", "Old Name")

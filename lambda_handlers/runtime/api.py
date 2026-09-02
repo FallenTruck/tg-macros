@@ -54,7 +54,30 @@ def _auth_identity(init_data: str, service: Optional[NutritionService] = None) -
     except (TelegramAuthError, ValueError, RuntimeError) as err:
         logger.info("miniapp_auth_rejected reason=%s", type(err).__name__)
         raise HTTPException(status_code=401, detail=str(err)) from err
-    return (service or _service()).resolve_user(user.telegram_user_id, user.username, user.display_name)
+    service = service or _service()
+    launch = None
+    if user.start_param:
+        repository = getattr(service, "repository", None)
+        if repository is None or not hasattr(repository, "get_mini_app_launch"):
+            raise HTTPException(status_code=401, detail="Mini App launch context is unavailable")
+        launch = repository.get_mini_app_launch(user.start_param)
+        if launch is None:
+            raise HTTPException(status_code=401, detail="Mini App launch token is invalid or expired")
+        if int(launch.get("telegram_user_id", 0) or 0) != user.telegram_user_id:
+            raise HTTPException(status_code=403, detail="Mini App launch user mismatch")
+        launch_chat_type = str(launch.get("chat_type", "") or "").strip().lower()
+        if launch_chat_type and user.chat_type and launch_chat_type != user.chat_type:
+            raise HTTPException(status_code=403, detail="Mini App launch chat mismatch")
+    identity = service.resolve_user(user.telegram_user_id, user.username, user.display_name)
+    if launch is not None and str(launch.get("user_id", "")) != str(identity.user_id):
+        raise HTTPException(status_code=403, detail="Mini App launch identity mismatch")
+    logger.info(
+        "miniapp_auth_succeeded start_param_present=%s chat_type=%s chat_instance_present=%s",
+        bool(user.start_param),
+        user.chat_type or "none",
+        bool(user.chat_instance),
+    )
+    return identity
 
 
 def _no_store(content: dict[str, Any], status_code: int = 200) -> JSONResponse:

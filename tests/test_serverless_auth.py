@@ -8,13 +8,14 @@ from urllib.parse import urlencode
 from macro_bot.serverless_auth import TelegramAuthError, validate_init_data
 
 
-def _init_data(bot_token="test-token", user_id=101, auth_date=None, **user_fields):
+def _init_data(bot_token="test-token", user_id=101, auth_date=None, init_fields=None, **user_fields):
     payload = {"id": user_id, "first_name": "Test", **user_fields}
     fields = {
         "auth_date": str(auth_date if auth_date is not None else int(time.time())),
         "query_id": "synthetic-query",
         "user": json.dumps(payload, separators=(",", ":")),
     }
+    fields.update(init_fields or {})
     check_string = "\n".join(f"{key}={value}" for key, value in sorted(fields.items()))
     secret_key = hmac.new(b"WebAppData", bot_token.encode(), hashlib.sha256).digest()
     fields["hash"] = hmac.new(secret_key, check_string.encode(), hashlib.sha256).hexdigest()
