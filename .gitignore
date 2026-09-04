@@ -5,3 +5,12 @@
 __pycache__/
 .venv/
 .DS_Store
+artifacts/e2e/
+playwright-report/
+test-results/
+storage-state*.json
+storage_state*.json
+*.auth.json
+*.trace.zip
+*.har
+*.webm

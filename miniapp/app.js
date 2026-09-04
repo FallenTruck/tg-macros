@@ -480,7 +480,7 @@ function renderWorkoutProgramme() {
         <p class="section-label">Workout in progress</p>
         <p class="workout-day-note">${escapeHtml(workoutName(activeSession))} is ready to resume.</p>
       </div>
-      <button class="primary workout-start-button" type="button" data-action="show-active-workout">Resume Workout</button>
+      <button class="primary workout-start-button" type="button" data-testid="workout-resume" data-action="show-active-workout">Resume Workout</button>
     </section>` : "";
   workoutProgrammeEl.innerHTML = activeBanner + programme.days.map((day) => `
     <section class="panel workout-day-card">
@@ -506,7 +506,7 @@ function workoutDayAction(day) {
   const action = activeSession && isActiveDay ? "resume-workout" : "start-workout";
   const label = activeSession ? (isActiveDay ? "Resume Workout" : "Workout already active") : `Start ${day.display_name || day.day_code}`;
   const disabled = activeSession && !isActiveDay ? " disabled" : "";
-  return `<button class="primary workout-start-button" type="button" data-action="${action}" data-workout-day="${escapeHtml(day.day_code)}"${disabled}>${escapeHtml(label)}</button>`;
+  return `<button class="primary workout-start-button" type="button" data-testid="workout-day-start-${escapeHtml(day.day_code)}" data-action="${action}" data-workout-day="${escapeHtml(day.day_code)}"${disabled}>${escapeHtml(label)}</button>`;
 }
 
 function renderWorkoutSession() {
@@ -524,7 +524,7 @@ function renderWorkoutSession() {
   const exercises = Object.fromEntries((state.workoutProgramme?.exercises || []).map((item) => [item.exercise_id, item]));
   const session = active.session;
   workoutSessionEl.innerHTML = `
-    <section class="panel workout-session-panel">
+    <section class="panel workout-session-panel" data-testid="active-workout">
       <div class="workout-session-head">
         <div>
           <p class="section-label">In progress</p>
@@ -581,7 +581,7 @@ function renderWorkoutCompletionDock(active) {
       <span class="section-label">Workout progress</span>
       <strong>${summary.completed} / ${summary.total} exercises completed</strong>
     </div>
-    <button class="primary" type="button" data-action="submit-workout"${summary.ready ? "" : " disabled"}>Submit Workout</button>
+    <button class="primary" type="button" data-testid="submit-workout" data-action="submit-workout"${summary.ready ? "" : " disabled"}>Submit Workout</button>
   `;
 }
 
@@ -626,7 +626,7 @@ function renderWorkoutExecution(execution, exercises) {
       </select>
     </label>` : `<p class="workout-exercise-name">${escapeHtml(exercise.canonical_name || execution.performed_exercise_id)}</p>`;
   const sets = (execution.sets || []).map((set) => `
-    <div class="workout-set-row">
+    <div class="workout-set-row" data-testid="workout-set-row-${escapeHtml(execution.execution_id)}-${set.set_ordinal}">
       <span>${String(set.set_type || "working").toLowerCase() === "warmup" ? "Warm-up" : "Set"} ${set.set_ordinal}</span>
       <strong>${escapeHtml(formatSetResult(set))}</strong>
       <span>${set.status === "skipped" ? "Skipped" : "Saved"}</span>
@@ -637,7 +637,7 @@ function renderWorkoutExecution(execution, exercises) {
     "exercise",
     `data-session-id="${escapeHtml(execution.session_id)}" data-execution-id="${escapeHtml(execution.execution_id)}" data-revision="${execution.revision}"`,
   );
-  return `<article class="workout-execution-card">
+  return `<article class="workout-execution-card" data-testid="workout-execution-${escapeHtml(execution.execution_id)}">
     <div class="workout-execution-head">
       <div><span class="section-label">Exercise ${execution.prescription_sequence}</span>${choice}<p class="workout-target">${escapeHtml(target)}</p></div>
       ${skipControls}
@@ -652,7 +652,7 @@ function renderSkipControls(kind, buttonAttributes) {
   const label = kind === "set" ? "Reason for skipping set" : "Reason for skipping exercise";
   const options = WORKOUT_SKIP_REASONS.map(([value, text]) => `<option value="${value}"${value === "intentionally_skipped" ? " selected" : ""}>${text}</option>`).join("");
   const buttonLabel = kind === "set" ? "Skip Set" : "Skip Exercise";
-  return `<div class="workout-skip-controls" data-skip-kind="${kind}"><select data-skip-reason-select aria-label="${label}">${options}</select><button class="ghost-button" type="button" data-action="skip-${kind}" aria-label="${buttonLabel}" ${buttonAttributes}>${buttonLabel}</button></div>`;
+  return `<div class="workout-skip-controls" data-skip-kind="${kind}"><select data-skip-reason-select aria-label="${label}">${options}</select><button class="ghost-button" type="button" data-testid="workout-skip-${kind}" data-action="skip-${kind}" aria-label="${buttonLabel}" ${buttonAttributes}>${buttonLabel}</button></div>`;
 }
 
 function renderSetForm(execution, ordinal) {
@@ -679,8 +679,8 @@ function renderSetForm(execution, ordinal) {
     "set",
     `${prefix} data-execution-revision="${execution.revision}"`,
   );
-  const repeatButton = previousSet ? `<button class="ghost-button workout-repeat-button" type="button" data-action="repeat-previous-set">Repeat previous set</button>` : "";
-  return `<form class="workout-set-form" data-set-form ${prefix} data-execution-revision="${execution.revision}"><div class="workout-set-fields">${fields}</div>${repeatButton}<div class="workout-set-actions"><button class="primary" type="submit">Save Set ${ordinal}</button>${skipControls}</div></form>`;
+  const repeatButton = previousSet ? `<button class="ghost-button workout-repeat-button" type="button" data-testid="workout-repeat-set" data-action="repeat-previous-set">Repeat previous set</button>` : "";
+  return `<form class="workout-set-form" data-testid="workout-set-form-${escapeHtml(execution.execution_id)}-${ordinal}" data-set-form ${prefix} data-execution-revision="${execution.revision}"><div class="workout-set-fields">${fields}</div>${repeatButton}<div class="workout-set-actions"><button class="primary" data-testid="workout-save-set" type="submit">Save Set ${ordinal}</button>${skipControls}</div></form>`;
 }
 
 function repeatPreviousSet(formElement, execution) {

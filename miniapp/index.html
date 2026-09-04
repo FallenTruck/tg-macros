@@ -26,17 +26,17 @@
         </div>
       </div>
       <p class="browser-login-copy">Use your JavaanFitness browser credentials to open your workspace.</p>
-      <div class="browser-login-error" id="browser-login-error" role="alert" hidden></div>
-      <form id="browser-login-form">
+      <div class="browser-login-error" id="browser-login-error" data-testid="browser-login-error" role="alert" hidden></div>
+      <form id="browser-login-form" data-testid="browser-login-form">
         <div class="field-group">
           <label for="browser-username">Username</label>
-          <input id="browser-username" name="username" type="text" autocomplete="username" autocapitalize="none" spellcheck="false" required />
+          <input id="browser-username" data-testid="browser-login-username" name="username" type="text" autocomplete="username" autocapitalize="none" spellcheck="false" required />
         </div>
         <div class="field-group">
           <label for="browser-password">Password</label>
-          <input id="browser-password" name="password" type="password" autocomplete="current-password" required />
+          <input id="browser-password" data-testid="browser-login-password" name="password" type="password" autocomplete="current-password" required />
         </div>
-        <button class="primary" id="browser-login-button" type="submit">Sign in</button>
+        <button class="primary" id="browser-login-button" data-testid="browser-login-submit" type="submit">Sign in</button>
       </form>
     </section>
 
@@ -55,7 +55,7 @@
             <h1 class="app-title">Nutrition Workspace</h1>
           </div>
         </div>
-        <button class="ghost-button app-logout" id="logout-button" type="button" hidden>Log out</button>
+        <button class="ghost-button app-logout" id="logout-button" data-testid="logout" type="button" hidden>Log out</button>
       </header>
 
       <section class="panel status-panel" id="status-panel" hidden>
@@ -125,7 +125,7 @@
             <p class="lead-copy">The programme is shared. Your workout and set entries are private to your account.</p>
           </section>
           <div id="workout-session" class="workout-session" aria-live="polite" hidden></div>
-          <div id="workout-completion-dock" class="workout-completion-dock" aria-live="polite" hidden></div>
+          <div id="workout-completion-dock" data-testid="workout-completion-dock" class="workout-completion-dock" aria-live="polite" hidden></div>
           <div id="workout-programme" class="workout-programme" aria-live="polite">
             <section class="panel profile-panel"><p class="summary-empty">Open this Mini App from Telegram to load the programme.</p></section>
           </div>
@@ -300,8 +300,8 @@
       </section>
     </main>
 
-    <nav class="bottom-nav" id="bottom-nav" aria-label="Primary" hidden>
-      <a href="#home" class="nav-item" id="nav-home" data-route="home">
+    <nav class="bottom-nav" id="bottom-nav" data-testid="bottom-navigation" aria-label="Primary" hidden>
+      <a href="#home" class="nav-item" id="nav-home" data-testid="nav-home" data-route="home">
         <svg viewBox="0 0 24 24" aria-hidden="true">
           <path
             d="M4 10.5 12 4l8 6.5v8.25a1.25 1.25 0 0 1-1.25 1.25h-4.5v-5h-4.5v5h-4.5A1.25 1.25 0 0 1 4 18.75Z"
@@ -309,7 +309,7 @@
         </svg>
         <span>Home</span>
       </a>
-      <a href="#profile" class="nav-item" id="nav-profile" data-route="profile">
+      <a href="#profile" class="nav-item" id="nav-profile" data-testid="nav-profile" data-route="profile">
         <svg viewBox="0 0 24 24" aria-hidden="true">
           <path
             d="M12 12a4.25 4.25 0 1 0-4.25-4.25A4.25 4.25 0 0 0 12 12Zm0 2c-4.14 0-7.5 2.57-7.5 5.75 0 .69.56 1.25 1.25 1.25h12.5c.69 0 1.25-.56 1.25-1.25C19.5 16.57 16.14 14 12 14Z"
@@ -317,7 +317,7 @@
         </svg>
         <span>Profile</span>
       </a>
-      <a href="#workout" class="nav-item" id="nav-workout" data-route="workout">
+      <a href="#workout" class="nav-item" id="nav-workout" data-testid="nav-workout" data-route="workout">
         <svg viewBox="0 0 24 24" aria-hidden="true">
           <path d="M5 9v6m14-6v6M8 7v10m8-10v10M8 12h8M3 10v4m18-4v4" />
         </svg>

@@ -50,6 +50,23 @@ def _viewer_payload(identity: Any) -> dict[str, Any]:
     }
 
 
+def _identity_from_mapping(repository: Any, mapping: Any) -> Any:
+    """Resolve the canonical identity key recorded in auth metadata."""
+
+    if repository is None:
+        return None
+    identity_pk = str(mapping.get("identity_pk", "") or "").strip() if isinstance(mapping, dict) else ""
+    if identity_pk and hasattr(repository, "get_identity_by_key"):
+        identity = repository.get_identity_by_key(identity_pk)
+        if identity is not None:
+            return identity
+    try:
+        telegram_user_id = int(mapping.get("telegram_user_id", 0) or 0)
+    except (TypeError, ValueError):
+        return None
+    return repository.get_identity(telegram_user_id) if hasattr(repository, "get_identity") else None
+
+
 def _log_workout_api_event(
     event: str,
     identity: Any = None,
@@ -92,17 +109,13 @@ def _service() -> NutritionService:
 
 def _browser_session_identity(request: Request, service: NutritionService) -> Any:
     repository = getattr(service, "repository", None)
-    if repository is None or not hasattr(repository, "get_browser_session") or not hasattr(repository, "get_identity"):
+    if repository is None or not hasattr(repository, "get_browser_session"):
         raise HTTPException(status_code=401, detail="Browser session is missing or expired.")
     session = repository.get_browser_session(request.cookies.get(BROWSER_SESSION_COOKIE, ""))
     if session is None:
         raise HTTPException(status_code=401, detail="Browser session is missing or expired.")
-    try:
-        telegram_user_id = int(session.get("telegram_user_id", 0) or 0)
-        user_id = str(session.get("user_id", "") or "")
-    except (TypeError, ValueError):
-        raise HTTPException(status_code=401, detail="Browser session is invalid.")
-    identity = repository.get_identity(telegram_user_id)
+    user_id = str(session.get("user_id", "") or "")
+    identity = _identity_from_mapping(repository, session)
     if identity is None or not user_id or identity.user_id != user_id:
         logger.info("browser_session_rejected reason=identity_mismatch")
         raise HTTPException(status_code=401, detail="Browser session is invalid.")
@@ -246,11 +259,7 @@ async def browser_login(
     password_valid = verify_web_password(password, credential)
     identity = None
     if password_valid and credential is not None and repository is not None:
-        try:
-            telegram_user_id = int(credential.get("telegram_user_id", 0) or 0)
-            identity = repository.get_identity(telegram_user_id)
-        except (TypeError, ValueError):
-            identity = None
+        identity = _identity_from_mapping(repository, credential)
         if identity is None or identity.user_id != str(credential.get("user_id", "") or ""):
             identity = None
     if identity is None:

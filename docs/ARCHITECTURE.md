@@ -139,11 +139,14 @@ and the `macro_bot` service/data modules.
 
 ### Browser credentials and sessions
 
-Browser access is restricted to credentials provisioned for known users. The
-Telegram identity remains canonical: provisioning takes an existing Telegram
-user id, reads its existing identity record, and stores the resulting internal
-`user_id` in the web credential record. A browser login never creates a new
-application user or copies profile, meal, target, programme, or workout data.
+Browser access is restricted to credentials provisioned for known users. For
+normal users, the Telegram identity remains canonical: provisioning takes an
+existing Telegram user id, reads its existing identity record, and stores the
+resulting internal `user_id` in the web credential record. The dev-only E2E
+harness is the explicit exception: it creates a marked synthetic identity in
+the separate `IDENTITY#E2E#javaan-e2e` namespace with no Telegram account. A
+browser login never creates an unmarked application user or copies profile,
+meal, target, programme, or workout data.
 
 The retained `FitnessDataTable` uses these isolated single-table records:
 

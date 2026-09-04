@@ -1,9 +1,10 @@
-.PHONY: sync-runtime deploy-miniapp
+.PHONY: sync-runtime deploy-miniapp e2e-install e2e-provision e2e-reset e2e-smoke e2e-screenshots
 
 RUNTIME_DIR = lambda_handlers/runtime
 AWS_PROFILE ?= fitness-dev
 AWS_REGION ?= ap-southeast-1
 STACK_NAME ?= tg-macros-dev
+E2E_PYTHON ?= .venv/bin/python
 
 sync-runtime:
 	mkdir -p "$(RUNTIME_DIR)/macro_bot" lambda_handlers/webhook_runtime
@@ -15,3 +16,21 @@ sync-runtime:
 
 deploy-miniapp:
 	AWS_PROFILE="$(AWS_PROFILE)" AWS_REGION="$(AWS_REGION)" AWS_DEFAULT_REGION="$(AWS_REGION)" STACK_NAME="$(STACK_NAME)" bash scripts/deploy_miniapp.sh
+
+e2e-install:
+	$(E2E_PYTHON) -m pip install -r requirements-e2e.txt
+	$(E2E_PYTHON) -m playwright install chromium
+
+e2e-provision:
+	AWS_PROFILE="$(AWS_PROFILE)" AWS_REGION="$(AWS_REGION)" AWS_DEFAULT_REGION="$(AWS_REGION)" $(E2E_PYTHON) scripts/provision_e2e_account.py
+
+e2e-reset:
+	AWS_PROFILE="$(AWS_PROFILE)" AWS_REGION="$(AWS_REGION)" AWS_DEFAULT_REGION="$(AWS_REGION)" $(E2E_PYTHON) scripts/reset_e2e_account.py
+
+e2e-smoke:
+	AWS_PROFILE="$(AWS_PROFILE)" AWS_REGION="$(AWS_REGION)" AWS_DEFAULT_REGION="$(AWS_REGION)" $(E2E_PYTHON) scripts/reset_e2e_account.py --yes
+	RUN_JAVAAN_E2E=1 AWS_PROFILE="$(AWS_PROFILE)" AWS_REGION="$(AWS_REGION)" AWS_DEFAULT_REGION="$(AWS_REGION)" $(E2E_PYTHON) -m unittest e2e.test_live_app.LiveJavaanFitnessE2ETests.test_live_smoke
+
+e2e-screenshots:
+	AWS_PROFILE="$(AWS_PROFILE)" AWS_REGION="$(AWS_REGION)" AWS_DEFAULT_REGION="$(AWS_REGION)" $(E2E_PYTHON) scripts/reset_e2e_account.py --yes
+	RUN_JAVAAN_E2E=1 AWS_PROFILE="$(AWS_PROFILE)" AWS_REGION="$(AWS_REGION)" AWS_DEFAULT_REGION="$(AWS_REGION)" $(E2E_PYTHON) -m unittest e2e.test_live_app.LiveJavaanFitnessE2ETests.test_live_screenshots

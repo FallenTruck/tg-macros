@@ -123,6 +123,30 @@ class MiniAppFrontendTests(unittest.TestCase):
         self.assertIn('            - Origin', template)
         self.assertIn('            - Referer', template)
 
+    def test_live_e2e_controls_have_stable_selectors_without_style_hooks(self):
+        root = Path(__file__).parents[1]
+        source = (root / "miniapp" / "app.js").read_text(encoding="utf-8")
+        markup = (root / "miniapp" / "index.html").read_text(encoding="utf-8")
+        for selector in (
+            'data-testid="browser-login-username"',
+            'data-testid="browser-login-password"',
+            'data-testid="browser-login-submit"',
+            'data-testid="logout"',
+            'data-testid="bottom-navigation"',
+            'data-testid="nav-profile"',
+            'data-testid="nav-workout"',
+            'data-testid="workout-completion-dock"',
+        ):
+            self.assertIn(selector, markup)
+        for selector in (
+            'data-testid="workout-day-start-${escapeHtml(day.day_code)}"',
+            'data-testid="workout-skip-${kind}"',
+            'data-testid="workout-set-row-${escapeHtml(execution.execution_id)}-${set.set_ordinal}"',
+            'data-testid="workout-repeat-set"',
+            'data-testid="submit-workout"',
+        ):
+            self.assertIn(selector, source)
+
 
 if __name__ == "__main__":
     unittest.main()

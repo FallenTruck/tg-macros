@@ -243,6 +243,9 @@ and `POST /api/auth/logout`. Login and logout are same-origin protected; do not
 paste their request bodies, cookies, or identity-bearing responses into logs or
 reports.
 
+For the isolated live browser harness and its dev-only synthetic account, read
+[`docs/E2E_TESTING.md`](E2E_TESTING.md) before running `make e2e-*` commands.
+
 Workout API calls require valid Telegram init data and a user-owned session.
 With a test Mini App session, exercise the authenticated completion route:
 

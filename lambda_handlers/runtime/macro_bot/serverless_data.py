@@ -90,6 +90,7 @@ class ServerlessIdentity:
     display_name: str
     created_at: str
     updated_at: str
+    identity_key: str = ""
 
     @property
     def pk(self) -> str:
@@ -97,7 +98,7 @@ class ServerlessIdentity:
 
     @property
     def identity_pk(self) -> str:
-        return f"IDENTITY#TELEGRAM#{self.telegram_user_id}"
+        return self.identity_key or f"IDENTITY#TELEGRAM#{self.telegram_user_id}"
 
 
 @dataclass(frozen=True)
@@ -471,7 +472,15 @@ class DynamoNutritionRepository:
                     Item=_to_storage(item),
                     ConditionExpression="attribute_not_exists(PK)",
                 )
-                return ServerlessIdentity(telegram_user_id, user_id, str(username or ""), str(display_name or ""), now, now)
+                return ServerlessIdentity(
+                    telegram_user_id,
+                    user_id,
+                    str(username or ""),
+                    str(display_name or ""),
+                    now,
+                    now,
+                    key["PK"],
+                )
             except Exception as err:
                 if not _is_conditional_failure(err):
                     raise
@@ -493,7 +502,15 @@ class DynamoNutritionRepository:
                     {":username": new_username, ":display_name": new_display_name, ":updated_at": now}
                 ),
             )
-        return ServerlessIdentity(telegram_user_id, user_id, new_username, new_display_name, created_at, now)
+        return ServerlessIdentity(
+            telegram_user_id,
+            user_id,
+            new_username,
+            new_display_name,
+            created_at,
+            now,
+            key["PK"],
+        )
 
     def get_identity(self, telegram_user_id: int) -> Optional[ServerlessIdentity]:
         """Read an existing Telegram identity without creating one."""
@@ -504,15 +521,34 @@ class DynamoNutritionRepository:
         item = self._get({"PK": f"IDENTITY#TELEGRAM#{telegram_user_id}", "SK": "USER"})
         if not item:
             return None
+        return self._identity_from_item(f"IDENTITY#TELEGRAM#{telegram_user_id}", item)
+
+    def _identity_from_item(self, identity_pk: str, item: Mapping[str, Any]) -> Optional[ServerlessIdentity]:
+        if item.get("entity_type") != "identity":
+            return None
+        try:
+            telegram_user_id = int(item.get("telegram_user_id", 0) or 0)
+        except (TypeError, ValueError):
+            return None
         now = utc_iso(self._now())
         return ServerlessIdentity(
             telegram_user_id=telegram_user_id,
-            user_id=str(item.get("user_id", "")),
+            user_id=str(item.get("user_id", "") or ""),
             username=str(item.get("username", "") or ""),
             display_name=str(item.get("display_name", "") or ""),
             created_at=str(item.get("created_at", now)),
             updated_at=str(item.get("updated_at", item.get("created_at", now))),
+            identity_key=identity_pk,
         )
+
+    def get_identity_by_key(self, identity_pk: Any) -> Optional[ServerlessIdentity]:
+        """Read a canonical identity by its exact identity partition key."""
+
+        identity_pk = str(identity_pk or "").strip()
+        if not identity_pk.startswith("IDENTITY#"):
+            return None
+        item = self._get({"PK": identity_pk, "SK": "USER"})
+        return self._identity_from_item(identity_pk, item) if item else None
 
     # ---- Browser credentials and sessions ------------------------------------
 
@@ -547,6 +583,7 @@ class DynamoNutritionRepository:
             "username": normalized,
             "user_id": identity.user_id,
             "telegram_user_id": identity.telegram_user_id,
+            "identity_pk": identity.identity_pk,
             "created_at": utc_iso(self._now()),
             "updated_at": utc_iso(self._now()),
             **dict(password_record),
@@ -581,6 +618,7 @@ class DynamoNutritionRepository:
                 "entity_type": "browser_session",
                 "user_id": identity.user_id,
                 "telegram_user_id": identity.telegram_user_id,
+                "identity_pk": identity.identity_pk,
                 "created_at": utc_iso(now),
                 "expires_at": epoch_seconds(now) + int(ttl_seconds),
                 "active": True,
