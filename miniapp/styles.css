@@ -737,12 +737,17 @@ button:disabled {
 }
 
 .workout-skip-controls {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
+  display: flex;
   align-items: end;
+  flex-wrap: wrap;
   gap: 8px;
-  min-width: min(100%, 280px);
+  min-width: 0;
+  width: 100%;
   max-width: 100%;
+}
+
+.workout-execution-head > .workout-skip-controls {
+  flex: 0 1 280px;
 }
 
 .workout-exercise-name,
@@ -777,6 +782,11 @@ button:disabled {
   border-radius: 12px;
   background: var(--panel-strong);
   color: var(--ink);
+}
+
+.workout-skip-controls select {
+  width: auto;
+  flex: 1 1 140px;
 }
 
 .workout-set-list {
@@ -995,6 +1005,10 @@ button:disabled {
 
   .workout-skip-controls {
     margin-top: 12px;
+  }
+
+  .workout-set-actions .workout-skip-controls {
+    margin-top: 0;
   }
 
   .workout-active-banner,

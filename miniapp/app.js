@@ -491,7 +491,7 @@ function renderWorkoutExecution(execution, exercises) {
 function renderSkipControls(kind, buttonAttributes) {
   const label = kind === "set" ? "Reason for skipping set" : "Reason for skipping exercise";
   const options = WORKOUT_SKIP_REASONS.map(([value, text]) => `<option value="${value}"${value === "intentionally_skipped" ? " selected" : ""}>${text}</option>`).join("");
-  return `<div class="workout-skip-controls"><select data-skip-reason-select aria-label="${label}">${options}</select><button class="ghost-button" type="button" data-action="skip-${kind}" ${buttonAttributes}>${kind === "set" ? "Skip set" : "Skip"}</button></div>`;
+  return `<div class="workout-skip-controls"><select data-skip-reason-select aria-label="${label}">${options}</select><button class="ghost-button" type="button" data-action="skip-${kind}" ${buttonAttributes}>${kind === "set" ? "Skip Set" : "Skip"}</button></div>`;
 }
 
 function renderSetForm(execution, ordinal) {
@@ -513,7 +513,7 @@ function renderSetForm(execution, ordinal) {
     "set",
     `${prefix} data-execution-revision="${execution.revision}"`,
   );
-  return `<form class="workout-set-form" data-set-form ${prefix} data-execution-revision="${execution.revision}"><div class="workout-set-fields">${fields}</div><div class="workout-set-actions"><button class="primary" type="submit">Save set ${ordinal}</button>${skipControls}</div></form>`;
+  return `<form class="workout-set-form" data-set-form ${prefix} data-execution-revision="${execution.revision}"><div class="workout-set-fields">${fields}</div><div class="workout-set-actions"><button class="primary" type="submit">Save Set ${ordinal}</button>${skipControls}</div></form>`;
 }
 
 function formatSetResult(set) {

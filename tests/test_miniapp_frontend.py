@@ -36,8 +36,13 @@ class MiniAppFrontendTests(unittest.TestCase):
         self.assertIn('data-set-form', source)
         self.assertIn('execution_expected_revision', source)
         self.assertIn('data-action="skip-${kind}"', source)
+        self.assertIn('Save Set ${ordinal}', source)
+        self.assertIn('Skip Set', source)
         self.assertIn('.workout-set-actions > .workout-skip-controls', styles)
-        self.assertIn('grid-template-columns: minmax(0, 1fr)', styles)
+        self.assertIn('display: flex', styles)
+        self.assertIn('flex-wrap: wrap', styles)
+        self.assertIn('flex: 1 1 140px', styles)
+        self.assertIn('width: auto', styles)
         self.assertIn('overflow-x: hidden', styles)
 
     def test_workout_skip_reason_selector_supports_readable_reasons_and_safe_default(self):
