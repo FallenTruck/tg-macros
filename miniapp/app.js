@@ -1,5 +1,5 @@
 const tg = window.Telegram?.WebApp ?? null;
-const initData = tg?.initData ?? "";
+const initData = String(tg?.initData ?? "").trim();
 
 const HOME_VIEW = "home";
 const PROFILE_VIEW = "profile";
@@ -24,7 +24,8 @@ const state = {
   workoutProgramme: null,
   activeWorkout: null,
   viewer: buildViewerFromTelegram(tg?.initDataUnsafe?.user ?? null),
-  hasAuth: Boolean(initData),
+  authMode: null,
+  hasAuth: false,
   activeView: HOME_VIEW,
   workoutMode: WORKOUT_PROGRAMME_MODE,
 };
@@ -51,6 +52,15 @@ const workoutSessionEl = document.querySelector("#workout-session");
 const workoutCompletionDockEl = document.querySelector("#workout-completion-dock");
 const workoutVersionMeta = document.querySelector("#workout-version-meta");
 const pageShell = document.querySelector(".page-shell");
+const appShell = document.querySelector("#app-shell");
+const bottomNav = document.querySelector("#bottom-nav");
+const authLoadingEl = document.querySelector("#auth-loading");
+const browserLoginEl = document.querySelector("#browser-login");
+const browserLoginForm = document.querySelector("#browser-login-form");
+const browserLoginButton = document.querySelector("#browser-login-button");
+const browserLoginError = document.querySelector("#browser-login-error");
+const authErrorEl = document.querySelector("#auth-error");
+const logoutButton = document.querySelector("#logout-button");
 
 const welcomeTitle = document.querySelector("#welcome-title");
 const welcomeHandle = document.querySelector("#welcome-handle");
@@ -83,6 +93,9 @@ if (tg) {
 
 window.addEventListener("hashchange", syncRoute);
 
+browserLoginForm?.addEventListener("submit", handleBrowserLogin);
+logoutButton?.addEventListener("click", handleBrowserLogout);
+
 workoutProgrammeEl?.addEventListener("click", handleWorkoutClick);
 workoutProgrammeEl?.addEventListener("change", handleWorkoutChange);
 workoutSessionEl?.addEventListener("click", handleWorkoutClick);
@@ -100,7 +113,7 @@ form.addEventListener("input", () => {
 form.addEventListener("submit", async (event) => {
   event.preventDefault();
   if (!state.hasAuth) {
-    setStatus("Open this page inside Telegram to preview and save targets.", "warning");
+    setStatus("Sign in to preview and save targets.", "warning");
     return;
   }
 
@@ -125,7 +138,7 @@ form.addEventListener("submit", async (event) => {
 
 saveButton.addEventListener("click", async () => {
   if (!state.hasAuth) {
-    setStatus("Open this page inside Telegram to save targets.", "warning");
+    setStatus("Sign in to save targets.", "warning");
     return;
   }
 
@@ -173,20 +186,35 @@ async function bootstrap() {
   renderWorkoutProgramme();
   syncRoute();
 
-  setStatus(
-    state.hasAuth
-      ? "Loading your saved target..."
-      : "Open this page from Telegram to load or save your target.",
-    state.hasAuth ? "info" : "warning"
-  );
-
-  if (!state.hasAuth) {
-    renderQuestionnaireContext();
+  if (initData) {
+    state.authMode = "telegram";
+    try {
+      const response = await apiFetch("/api/profile");
+      revealApp("telegram", response.viewer);
+      await loadAuthenticatedApp(response);
+    } catch (_error) {
+      showTelegramAuthError();
+    }
     return;
   }
 
   try {
-    const response = await apiFetch("/api/profile");
+    const response = await apiFetch("/api/auth/session");
+    if (!response.authenticated) {
+      showBrowserLogin();
+      return;
+    }
+    revealApp("browser", response.viewer);
+    await loadAuthenticatedApp();
+  } catch (_error) {
+    showBrowserLogin("Could not check your browser session. Please sign in again.");
+  }
+}
+
+async function loadAuthenticatedApp(profileResponse = null) {
+  setStatus("Loading your saved target...", "info");
+  try {
+    const response = profileResponse || await apiFetch("/api/profile");
     state.meta = response;
     state.profile = response.profile || null;
     state.viewer = normalizeViewer(response.viewer, state.viewer);
@@ -211,6 +239,85 @@ async function bootstrap() {
       "error"
     );
     renderQuestionnaireContext();
+  }
+}
+
+function revealApp(mode, viewer = null) {
+  state.authMode = mode;
+  state.hasAuth = true;
+  state.viewer = normalizeViewer(viewer, state.viewer);
+  authLoadingEl.hidden = true;
+  browserLoginEl.hidden = true;
+  authErrorEl.hidden = true;
+  appShell.hidden = false;
+  bottomNav.hidden = false;
+  logoutButton.hidden = mode !== "browser";
+  renderViewer();
+}
+
+function showBrowserLogin(message = "") {
+  state.authMode = null;
+  state.hasAuth = false;
+  authLoadingEl.hidden = true;
+  authErrorEl.hidden = true;
+  appShell.hidden = true;
+  bottomNav.hidden = true;
+  browserLoginEl.hidden = false;
+  browserLoginError.textContent = message;
+  browserLoginError.hidden = !message;
+  if (message) {
+    browserLoginForm.querySelector("input[name='username']")?.focus();
+  }
+}
+
+function showTelegramAuthError() {
+  state.hasAuth = false;
+  authLoadingEl.hidden = true;
+  browserLoginEl.hidden = true;
+  appShell.hidden = true;
+  bottomNav.hidden = true;
+  authErrorEl.hidden = false;
+}
+
+async function handleBrowserLogin(event) {
+  event.preventDefault();
+  const values = new FormData(browserLoginForm);
+  browserLoginError.hidden = true;
+  browserLoginButton.disabled = true;
+  browserLoginButton.textContent = "Signing in…";
+  try {
+    const response = await apiFetch("/api/auth/login", {
+      method: "POST",
+      body: JSON.stringify({
+        username: String(values.get("username") || ""),
+        password: String(values.get("password") || ""),
+      }),
+    });
+    browserLoginForm.reset();
+    revealApp("browser", response.viewer);
+    await loadAuthenticatedApp();
+  } catch (error) {
+    browserLoginError.textContent = error.message || "Invalid username or password.";
+    browserLoginError.hidden = false;
+  } finally {
+    browserLoginButton.disabled = false;
+    browserLoginButton.textContent = "Sign in";
+  }
+}
+
+async function handleBrowserLogout() {
+  logoutButton.disabled = true;
+  try {
+    await apiFetch("/api/auth/logout", {method: "POST"});
+    state.profile = null;
+    state.preview = null;
+    state.workoutProgramme = null;
+    state.activeWorkout = null;
+    showBrowserLogin("You have been signed out.");
+  } catch (error) {
+    setStatus(error.message || "Could not sign out.", "error");
+  } finally {
+    logoutButton.disabled = false;
   }
 }
 
@@ -278,12 +385,14 @@ function viewerSecondaryLabel(viewer) {
     return viewer.display_name;
   }
   if (viewer.username) {
-    return "Telegram profile connected";
+    return state.authMode === "browser" ? "Browser session connected" : "Telegram profile connected";
   }
   if (viewer.display_name) {
-    return "Telegram display name loaded";
+    return state.authMode === "browser" ? "Browser session connected" : "Telegram display name loaded";
   }
-  return "Open this Mini App from Telegram to load your identity.";
+  return state.authMode === "browser"
+    ? "Browser session connected"
+    : "Open this Mini App from Telegram to load your identity.";
 }
 
 function viewerInitialValue(viewer) {
@@ -441,9 +550,19 @@ function workoutCompletionSummary(active) {
       return true;
     }
     const minimumSets = Math.max(1, Number(execution.prescribed_set_count_min) || 1);
-    return (execution.sets || []).length >= minimumSets;
+    return resolvedWorkingSetCount(execution) >= minimumSets;
   }).length;
   return {completed, total: executions.length, ready: executions.length > 0 && completed === executions.length};
+}
+
+function isResolvedWorkingSet(set) {
+  const setType = String(set?.set_type || "working").trim().toLowerCase();
+  const status = String(set?.status || "completed").trim().toLowerCase();
+  return setType === "working" && (status === "completed" || status === "skipped");
+}
+
+function resolvedWorkingSetCount(execution) {
+  return (execution?.sets || []).filter(isResolvedWorkingSet).length;
 }
 
 function renderWorkoutCompletionDock(active) {
@@ -508,7 +627,7 @@ function renderWorkoutExecution(execution, exercises) {
     </label>` : `<p class="workout-exercise-name">${escapeHtml(exercise.canonical_name || execution.performed_exercise_id)}</p>`;
   const sets = (execution.sets || []).map((set) => `
     <div class="workout-set-row">
-      <span>Set ${set.set_ordinal}</span>
+      <span>${String(set.set_type || "working").toLowerCase() === "warmup" ? "Warm-up" : "Set"} ${set.set_ordinal}</span>
       <strong>${escapeHtml(formatSetResult(set))}</strong>
       <span>${set.status === "skipped" ? "Skipped" : "Saved"}</span>
     </div>`).join("");
@@ -532,29 +651,55 @@ function renderWorkoutExecution(execution, exercises) {
 function renderSkipControls(kind, buttonAttributes) {
   const label = kind === "set" ? "Reason for skipping set" : "Reason for skipping exercise";
   const options = WORKOUT_SKIP_REASONS.map(([value, text]) => `<option value="${value}"${value === "intentionally_skipped" ? " selected" : ""}>${text}</option>`).join("");
-  return `<div class="workout-skip-controls"><select data-skip-reason-select aria-label="${label}">${options}</select><button class="ghost-button" type="button" data-action="skip-${kind}" ${buttonAttributes}>${kind === "set" ? "Skip Set" : "Skip"}</button></div>`;
+  const buttonLabel = kind === "set" ? "Skip Set" : "Skip Exercise";
+  return `<div class="workout-skip-controls" data-skip-kind="${kind}"><select data-skip-reason-select aria-label="${label}">${options}</select><button class="ghost-button" type="button" data-action="skip-${kind}" aria-label="${buttonLabel}" ${buttonAttributes}>${buttonLabel}</button></div>`;
 }
 
 function renderSetForm(execution, ordinal) {
   const prefix = `data-session-id="${escapeHtml(execution.session_id)}" data-execution-id="${escapeHtml(execution.execution_id)}" data-ordinal="${ordinal}"`;
+  const previousSet = [...(execution.sets || [])]
+    .filter((set) => String(set.set_type || "working").trim().toLowerCase() === "working" && String(set.status || "completed").trim().toLowerCase() === "completed")
+    .sort((left, right) => (Number(left.set_ordinal) || 0) - (Number(right.set_ordinal) || 0))
+    .slice(-1)[0];
+  const inputValue = (value) => value == null ? "" : ` value="${escapeHtml(value)}"`;
   let fields = "";
   if (execution.execution_type === "timed") {
-    fields = `<label>Seconds<input name="duration_seconds" type="number" min="1" inputmode="numeric" required></label>`;
+    fields = `<label>Seconds<input name="duration_seconds" type="number" min="1" inputmode="numeric" required${inputValue(previousSet?.duration_seconds)}></label>`;
   } else if (execution.execution_type === "side_aware_reps") {
-    fields = `<label>Load (kg)<input name="load_value" type="number" min="0" step="0.25" inputmode="decimal" required></label><label>Left reps<input name="left_reps" type="number" min="1" inputmode="numeric" required></label><label>Right reps<input name="right_reps" type="number" min="1" inputmode="numeric" required></label>`;
+    fields = `<label>Load (kg)<input name="load_value" type="number" min="0" step="0.25" inputmode="decimal" required${inputValue(previousSet?.load_value)}></label><label>Left reps<input name="left_reps" type="number" min="1" inputmode="numeric" required${inputValue(previousSet?.side_reps?.left)}></label><label>Right reps<input name="right_reps" type="number" min="1" inputmode="numeric" required${inputValue(previousSet?.side_reps?.right)}></label>`;
   } else {
     const load = execution.loading_convention === "per_dumbbell_kg" ? "Weight per dumbbell (kg)" : "Load (kg)";
-    fields = execution.execution_type === "loaded_reps" ? `<label>${load}<input name="load_value" type="number" min="0" step="0.25" inputmode="decimal" required></label>` : "";
-    fields += `<label>Reps<input name="reps" type="number" min="1" inputmode="numeric" required></label>`;
+    fields = execution.execution_type === "loaded_reps" ? `<label>${load}<input name="load_value" type="number" min="0" step="0.25" inputmode="decimal" required${inputValue(previousSet?.load_value)}></label>` : "";
+    fields += `<label>Reps<input name="reps" type="number" min="1" inputmode="numeric" required${inputValue(previousSet?.reps)}></label>`;
   }
   if (execution.execution_type !== "timed") {
-    fields += `<label>RIR <span class="optional-label">optional</span><input name="rir" type="number" min="0" max="10" step="0.5" inputmode="decimal"></label>`;
+    fields += `<label>RIR <span class="optional-label">optional</span><input name="rir" type="number" min="0" max="10" step="0.5" inputmode="decimal"${inputValue(previousSet?.rir)}></label>`;
   }
   const skipControls = renderSkipControls(
     "set",
     `${prefix} data-execution-revision="${execution.revision}"`,
   );
-  return `<form class="workout-set-form" data-set-form ${prefix} data-execution-revision="${execution.revision}"><div class="workout-set-fields">${fields}</div><div class="workout-set-actions"><button class="primary" type="submit">Save Set ${ordinal}</button>${skipControls}</div></form>`;
+  const repeatButton = previousSet ? `<button class="ghost-button workout-repeat-button" type="button" data-action="repeat-previous-set">Repeat previous set</button>` : "";
+  return `<form class="workout-set-form" data-set-form ${prefix} data-execution-revision="${execution.revision}"><div class="workout-set-fields">${fields}</div>${repeatButton}<div class="workout-set-actions"><button class="primary" type="submit">Save Set ${ordinal}</button>${skipControls}</div></form>`;
+}
+
+function repeatPreviousSet(formElement, execution) {
+  const previousSet = [...(execution?.sets || [])]
+    .filter((set) => String(set.set_type || "working").trim().toLowerCase() === "working" && String(set.status || "completed").trim().toLowerCase() === "completed")
+    .sort((left, right) => (Number(left.set_ordinal) || 0) - (Number(right.set_ordinal) || 0))
+    .slice(-1)[0];
+  if (!previousSet) return false;
+  const setValue = (name, value) => {
+    const input = formElement.elements.namedItem(name);
+    if (input) input.value = value == null ? "" : value;
+  };
+  setValue("load_value", previousSet.load_value);
+  setValue("reps", previousSet.reps);
+  setValue("left_reps", previousSet.side_reps?.left);
+  setValue("right_reps", previousSet.side_reps?.right);
+  setValue("duration_seconds", previousSet.duration_seconds);
+  setValue("rir", previousSet.rir);
+  return true;
 }
 
 function formatSetResult(set) {
@@ -583,6 +728,14 @@ async function handleWorkoutClick(event) {
     }
     if (action === "view-programme") {
       setWorkoutMode(WORKOUT_PROGRAMME_MODE);
+      return;
+    }
+    if (action === "repeat-previous-set") {
+      const formElement = button.closest("[data-set-form]");
+      const execution = state.activeWorkout?.executions.find((item) => item.execution_id === formElement?.dataset.executionId);
+      if (formElement && repeatPreviousSet(formElement, execution)) {
+        setStatus("Previous set values copied. Adjust them if needed, then save.", "info");
+      }
       return;
     }
     if (action === "skip-exercise") {
@@ -622,6 +775,13 @@ async function handleWorkoutClick(event) {
 async function handleWorkoutChange(event) {
   const select = event.target.closest('[data-action="choose-exercise"]');
   if (!select) return;
+  const execution = state.activeWorkout?.executions.find((item) => item.execution_id === select.dataset.executionId);
+  const allowedExerciseIds = new Set((execution?.allowed_exercise_ids || []).map((id) => String(id)));
+  if (!execution || !allowedExerciseIds.has(String(select.value))) {
+    setStatus("That exercise is not allowed for this prescription.", "error");
+    renderWorkoutSession();
+    return;
+  }
   try {
     const response = await apiFetch(`/api/workout/sessions/${encodeURIComponent(select.dataset.sessionId)}/executions/${encodeURIComponent(select.dataset.executionId)}`, {method: "PUT", body: JSON.stringify({performed_exercise_id: select.value, expected_revision: Number((state.activeWorkout.executions.find((item) => item.execution_id === select.dataset.executionId) || {}).revision)})});
     state.activeWorkout = response;
@@ -643,7 +803,17 @@ async function handleWorkoutSubmit(event) {
   };
   if (values.get("load_value") !== null && values.get("load_value") !== "") payload.load_value = Number(values.get("load_value"));
   if (values.get("reps") !== null && values.get("reps") !== "") payload.reps = Number(values.get("reps"));
-  if (values.get("left_reps") !== null && values.get("left_reps") !== "") payload.side_reps = {left: Number(values.get("left_reps")), right: Number(values.get("right_reps"))};
+  const leftReps = String(values.get("left_reps") ?? "").trim();
+  const rightReps = String(values.get("right_reps") ?? "").trim();
+  if (execution.execution_type === "side_aware_reps") {
+    const left = Number(leftReps);
+    const right = Number(rightReps);
+    if (!leftReps || !rightReps || !Number.isInteger(left) || !Number.isInteger(right) || left < 1 || right < 1) {
+      setStatus("Enter a whole-number rep count for both left and right sides.", "error");
+      return;
+    }
+    payload.side_reps = {left, right};
+  }
   if (values.get("duration_seconds") !== null && values.get("duration_seconds") !== "") payload.duration_seconds = Number(values.get("duration_seconds"));
   if (values.get("rir") !== null && values.get("rir") !== "") payload.rir = Number(values.get("rir"));
   const existing = (execution.sets || []).find((item) => Number(item.set_ordinal) === Number(formElement.dataset.ordinal));
@@ -822,7 +992,7 @@ function renderPreview() {
 
 function renderQuestionnaireContext() {
   if (!state.hasAuth) {
-    setQuestionnaireNote("Preview and save only work when this page is opened inside Telegram.", "warning");
+    setQuestionnaireNote("Sign in to preview and save your target.", "warning");
     return;
   }
 
@@ -879,13 +1049,17 @@ function collectAnswers() {
 }
 
 async function apiFetch(url, options = {}) {
+  const headers = {
+    "Content-Type": "application/json",
+    ...(options.headers || {}),
+  };
+  if (initData) {
+    headers["X-Telegram-Init-Data"] = initData;
+  }
   const response = await fetch(url, {
     method: options.method || "GET",
-    headers: {
-      "Content-Type": "application/json",
-      "X-Telegram-Init-Data": initData,
-      ...(options.headers || {}),
-    },
+    headers,
+    credentials: "same-origin",
     body: options.body,
   });
 

@@ -47,6 +47,61 @@ body {
     linear-gradient(180deg, #faf6f0 0%, var(--bg) 42%, var(--bg-deep) 100%);
 }
 
+.auth-loading,
+.browser-login,
+.auth-error {
+  width: min(480px, calc(100vw - 24px));
+  margin: 10vh auto 0;
+  padding: 28px;
+}
+
+.auth-loading {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+}
+
+.auth-loading h1,
+.browser-login h1,
+.auth-error h1 {
+  margin: 8px 0 10px;
+  line-height: 1.02;
+}
+
+.auth-loading p,
+.browser-login-copy,
+.auth-error p {
+  margin: 0;
+  color: var(--muted);
+  line-height: 1.5;
+}
+
+.browser-login-brand {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+}
+
+.browser-login form {
+  display: grid;
+  gap: 16px;
+  margin-top: 24px;
+}
+
+.browser-login .primary {
+  width: 100%;
+  margin-top: 4px;
+}
+
+.browser-login-error {
+  margin-top: 16px;
+  padding: 12px 14px;
+  border: 1px solid rgba(154, 54, 33, 0.24);
+  border-radius: 14px;
+  background: var(--error-soft);
+  color: var(--accent-deep);
+}
+
 button,
 input,
 select {
@@ -89,7 +144,15 @@ label,
 }
 
 .app-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
   margin-bottom: 14px;
+}
+
+.app-logout {
+  flex-shrink: 0;
 }
 
 .brand-cluster {
@@ -877,8 +940,14 @@ button:disabled {
 .workout-set-fields label {
   display: grid;
   gap: 5px;
+  min-width: 0;
   color: var(--muted);
   font-size: 0.82rem;
+}
+
+.workout-repeat-button {
+  margin-top: 8px;
+  min-height: 38px;
 }
 
 .workout-set-actions {

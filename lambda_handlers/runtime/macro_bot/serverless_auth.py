@@ -11,7 +11,10 @@ import hashlib
 import hmac
 import json
 import logging
+import binascii
 import os
+import base64
+import unicodedata
 import time
 from dataclasses import dataclass
 from typing import Any, Callable, Mapping, Optional
@@ -21,6 +24,113 @@ logger = logging.getLogger(__name__)
 
 DEFAULT_MAX_AGE_SECONDS = 3600
 DEFAULT_FUTURE_SKEW_SECONDS = 60
+WEB_PASSWORD_ALGORITHM = "pbkdf2_sha256"
+WEB_PASSWORD_VERSION = 1
+WEB_PASSWORD_ITERATIONS = 600_000
+WEB_PASSWORD_SALT_BYTES = 16
+WEB_PASSWORD_HASH_BYTES = 32
+WEB_PASSWORD_MIN_LENGTH = 12
+WEB_PASSWORD_MAX_LENGTH = 1024
+WEB_USERNAME_MAX_LENGTH = 128
+
+
+def normalize_web_username(username: Any) -> str:
+    """Return the canonical username used for browser credential lookup."""
+
+    value = unicodedata.normalize("NFKC", str(username or "")).strip().casefold()
+    if not value or len(value) > WEB_USERNAME_MAX_LENGTH:
+        raise ValueError("username is invalid")
+    return value
+
+
+def web_credential_key(username: Any) -> str:
+    """Return a non-reversible partition key for a browser username."""
+
+    normalized = normalize_web_username(username)
+    digest = hashlib.sha256(f"javaanfitness-web-credential-v1\0{normalized}".encode("utf-8")).hexdigest()
+    return f"WEB_CREDENTIAL#{digest}"
+
+
+def browser_session_token_hash(token: Any) -> str:
+    """Hash an opaque browser token before it is used as a DynamoDB key."""
+
+    value = str(token or "")
+    return hashlib.sha256(f"javaanfitness-browser-session-v1\0{value}".encode("utf-8")).hexdigest()
+
+
+def _validate_password(password: Any) -> str:
+    if not isinstance(password, str):
+        raise ValueError("password is invalid")
+    if not WEB_PASSWORD_MIN_LENGTH <= len(password) <= WEB_PASSWORD_MAX_LENGTH:
+        raise ValueError("password must be between 12 and 1024 characters")
+    return password
+
+
+def hash_web_password(password: str, *, iterations: int = WEB_PASSWORD_ITERATIONS) -> dict[str, Any]:
+    """Hash a browser password with a random salt and explicit KDF metadata."""
+
+    password = _validate_password(password)
+    iterations = int(iterations)
+    if iterations < 100_000:
+        raise ValueError("password KDF iteration count is too low")
+    salt = os.urandom(WEB_PASSWORD_SALT_BYTES)
+    derived = hashlib.pbkdf2_hmac(
+        "sha256",
+        password.encode("utf-8"),
+        salt,
+        iterations,
+        dklen=WEB_PASSWORD_HASH_BYTES,
+    )
+    return {
+        "password_algorithm": WEB_PASSWORD_ALGORITHM,
+        "password_version": WEB_PASSWORD_VERSION,
+        "password_iterations": iterations,
+        "password_salt": base64.b64encode(salt).decode("ascii"),
+        "password_hash": base64.b64encode(derived).decode("ascii"),
+    }
+
+
+def _dummy_password_record() -> dict[str, Any]:
+    """Provide a valid work factor for unknown usernames without a secret."""
+
+    return {
+        "password_algorithm": WEB_PASSWORD_ALGORITHM,
+        "password_version": WEB_PASSWORD_VERSION,
+        "password_iterations": WEB_PASSWORD_ITERATIONS,
+        "password_salt": base64.b64encode(b"javaanfitness-dummy-salt").decode("ascii"),
+        "password_hash": base64.b64encode(b"\0" * WEB_PASSWORD_HASH_BYTES).decode("ascii"),
+    }
+
+
+def verify_web_password(password: Any, credential: Optional[Mapping[str, Any]]) -> bool:
+    """Verify a password without revealing whether the username exists."""
+
+    password_text = password if isinstance(password, str) else ""
+    record = dict(credential or _dummy_password_record())
+    try:
+        if record.get("password_algorithm") != WEB_PASSWORD_ALGORITHM:
+            return False
+        if int(record.get("password_version", 0)) != WEB_PASSWORD_VERSION:
+            return False
+        iterations = int(record["password_iterations"])
+        if iterations < 100_000 or iterations > 10_000_000:
+            return False
+        salt = base64.b64decode(str(record["password_salt"]), validate=True)
+        expected = base64.b64decode(str(record["password_hash"]), validate=True)
+        if len(salt) < 16 or len(expected) != WEB_PASSWORD_HASH_BYTES:
+            return False
+    except (KeyError, TypeError, ValueError, binascii.Error):
+        return False
+    if len(password_text) > WEB_PASSWORD_MAX_LENGTH:
+        return False
+    derived = hashlib.pbkdf2_hmac(
+        "sha256",
+        password_text.encode("utf-8"),
+        salt,
+        iterations,
+        dklen=len(expected),
+    )
+    return hmac.compare_digest(derived, expected)
 
 
 class TelegramAuthError(ValueError):

@@ -13,9 +13,36 @@ it does not deploy Lambda code or static Mini App assets.
 | Mini App frontend | `make deploy-miniapp` | S3 assets plus CloudFront invalidation |
 | Full release | Backend sequence, then frontend sequence | Both release paths |
 
+Browser authentication changes are a backend, frontend, and CloudFront
+release. The CloudFront `/api/*` origin request policy forwards only the
+`jf_session` cookie plus the allowlisted application/auth headers; it does not
+forward unrelated browser cookies.
+
 `sam deploy` does not upload the Mini App contents to the application bucket.
 `make deploy-miniapp` does not deploy Lambda or CloudFormation changes.
 Pushing to Git also does not deploy either release path.
+
+## Provision a known browser login
+
+Provisioning is an administrative local command, not a public registration
+flow. It must target an already-existing Telegram-linked JavaanFitness user;
+the command checks that identity before writing anything. Run it with the AWS
+profile and table context for the intended stack:
+
+```bash
+AWS_PROFILE=fitness-dev AWS_REGION=ap-southeast-1 \
+  .venv/bin/python scripts/provision_web_login.py \
+  --username <known-browser-username> \
+  --telegram-user-id <existing-telegram-user-id>
+```
+
+The command prompts for the password twice without echoing it, hashes it
+locally with PBKDF2-HMAC-SHA256, and writes only the credential record to the
+retained `FitnessDataTable`. It never accepts a password as a normal command
+line argument. To reset the same known login, repeat the command with
+`--replace`; it will not reassign the username to a different identity.
+Do not put usernames, passwords, hashes, session tokens, or Telegram init data
+in Git, deployment output, or reports.
 
 | Change type | Tests | `make sync-runtime` | SAM build/deploy | Mini App deploy |
 | --- | --- | --- | --- | --- |
@@ -198,6 +225,23 @@ HTTP_API_URL="$(aws cloudformation describe-stacks \
   --output text)"
 curl -fsS "$HTTP_API_URL/api/health"
 ```
+
+For a browser-auth smoke test through the CloudFront URL, use a private shell
+or browser session and do not record credentials or cookies:
+
+```text
+Open the Mini App URL directly in Safari/Chrome.
+Confirm the browser-only sign-in form appears without opening Telegram.
+Sign in with a provisioned login and confirm the existing profile/target and
+workout data are present. Reload the page to confirm the session persists.
+Use Log out and confirm the login form returns; then confirm Telegram still
+opens the app automatically with valid init data.
+```
+
+The browser session API is `POST /api/auth/login`, `GET /api/auth/session`,
+and `POST /api/auth/logout`. Login and logout are same-origin protected; do not
+paste their request bodies, cookies, or identity-bearing responses into logs or
+reports.
 
 Workout API calls require valid Telegram init data and a user-owned session.
 With a test Mini App session, exercise the authenticated completion route:

@@ -3,12 +3,50 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>Macro Setup</title>
+    <title>JavaanFitness</title>
     <link rel="stylesheet" href="/styles.css?v=__MINIAPP_VERSION__" />
     <script src="https://telegram.org/js/telegram-web-app.js"></script>
   </head>
   <body>
-    <main class="page-shell">
+    <section class="auth-loading panel" id="auth-loading" role="status" aria-live="polite">
+      <div class="brand-mark" aria-hidden="true">JF</div>
+      <div>
+        <p class="eyebrow">JavaanFitness</p>
+        <h1>Loading your workspace</h1>
+        <p>Checking your secure session…</p>
+      </div>
+    </section>
+
+    <section class="browser-login panel" id="browser-login" aria-labelledby="browser-login-title" hidden>
+      <div class="browser-login-brand">
+        <div class="brand-mark" aria-hidden="true">JF</div>
+        <div>
+          <p class="eyebrow">JavaanFitness</p>
+          <h1 id="browser-login-title">Sign in to continue</h1>
+        </div>
+      </div>
+      <p class="browser-login-copy">Use your JavaanFitness browser credentials to open your workspace.</p>
+      <div class="browser-login-error" id="browser-login-error" role="alert" hidden></div>
+      <form id="browser-login-form">
+        <div class="field-group">
+          <label for="browser-username">Username</label>
+          <input id="browser-username" name="username" type="text" autocomplete="username" autocapitalize="none" spellcheck="false" required />
+        </div>
+        <div class="field-group">
+          <label for="browser-password">Password</label>
+          <input id="browser-password" name="password" type="password" autocomplete="current-password" required />
+        </div>
+        <button class="primary" id="browser-login-button" type="submit">Sign in</button>
+      </form>
+    </section>
+
+    <section class="auth-error panel" id="auth-error" role="alert" hidden>
+      <p class="eyebrow">JavaanFitness</p>
+      <h1>We couldn’t verify this Telegram session</h1>
+      <p>Close and reopen the Mini App from Telegram, then try again.</p>
+    </section>
+
+    <main class="page-shell" id="app-shell" hidden>
       <header class="app-bar">
         <div class="brand-cluster">
           <div class="brand-mark">JF</div>
@@ -17,6 +55,7 @@
             <h1 class="app-title">Nutrition Workspace</h1>
           </div>
         </div>
+        <button class="ghost-button app-logout" id="logout-button" type="button" hidden>Log out</button>
       </header>
 
       <section class="panel status-panel" id="status-panel" hidden>
@@ -261,7 +300,7 @@
       </section>
     </main>
 
-    <nav class="bottom-nav" aria-label="Primary">
+    <nav class="bottom-nav" id="bottom-nav" aria-label="Primary" hidden>
       <a href="#home" class="nav-item" id="nav-home" data-route="home">
         <svg viewBox="0 0 24 24" aria-hidden="true">
           <path

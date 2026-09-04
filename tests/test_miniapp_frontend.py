@@ -42,6 +42,12 @@ class MiniAppFrontendTests(unittest.TestCase):
         self.assertIn('workoutCompletionDockEl?.addEventListener("click", handleWorkoutClick)', source)
         self.assertIn('Submit Workout', source)
         self.assertIn('/complete', source)
+        self.assertIn('resolvedWorkingSetCount(execution)', source)
+        self.assertIn('set.set_type || "working"', source)
+        self.assertIn('Enter a whole-number rep count for both left and right sides.', source)
+        self.assertIn('Repeat previous set', source)
+        self.assertIn('data-action="repeat-previous-set"', source)
+        self.assertIn('Skip Exercise', source)
         self.assertIn('.workout-set-actions > .workout-skip-controls', styles)
         self.assertIn('display: flex', styles)
         self.assertIn('flex-wrap: wrap', styles)
@@ -95,6 +101,27 @@ class MiniAppFrontendTests(unittest.TestCase):
         self.assertIn("shasum -a 256 miniapp/index.html miniapp/app.js miniapp/styles.css", deploy_script)
         self.assertIn('no-cache, no-store, must-revalidate', deploy_script)
         self.assertIn('public, max-age=31536000, immutable', deploy_script)
+
+    def test_auth_startup_has_distinct_browser_and_telegram_states(self):
+        root = Path(__file__).parents[1]
+        source = (root / "miniapp" / "app.js").read_text(encoding="utf-8")
+        markup = (root / "miniapp" / "index.html").read_text(encoding="utf-8")
+        template = (root / "template.yaml").read_text(encoding="utf-8")
+        self.assertIn('const initData = String(tg?.initData ?? "").trim();', source)
+        self.assertIn('apiFetch("/api/auth/session")', source)
+        self.assertIn('revealApp("browser", response.viewer)', source)
+        self.assertIn('revealApp("telegram", response.viewer)', source)
+        self.assertIn("showTelegramAuthError();", source)
+        self.assertIn('credentials: "same-origin"', source)
+        self.assertIn('id="browser-login-form"', markup)
+        self.assertIn('autocomplete="username"', markup)
+        self.assertIn('autocomplete="current-password"', markup)
+        self.assertIn('id="app-shell" hidden', markup)
+        self.assertIn('id="logout-button"', markup)
+        self.assertIn('CookieBehavior: whitelist', template)
+        self.assertIn('            - jf_session', template)
+        self.assertIn('            - Origin', template)
+        self.assertIn('            - Referer', template)
 
 
 if __name__ == "__main__":

@@ -49,7 +49,8 @@ Telegram webhook traffic goes directly to API Gateway and then to the webhook
 processing path. Mini App browser traffic goes to CloudFront: `/api/*` is routed
 to API Gateway and static paths are routed to the private S3 origin. API Gateway
 is not upstream of CloudFront. CloudFront uses an Origin Access Control (OAC),
-so the S3 bucket is not public.
+so the S3 bucket is not public. The same Mini App supports Telegram and
+standalone browser authentication without a second frontend or API.
 
 ## Infrastructure source of truth
 
@@ -121,13 +122,44 @@ and the `macro_bot` service/data modules.
 
 1. The browser loads `index.html`, `app.js`, and `styles.css` from CloudFront.
 2. `miniapp/app.js` sends API calls through the same CloudFront hostname.
-3. The `X-Telegram-Init-Data` header authenticates Mini App requests in
-   `lambda_handlers/api.py`.
-4. The API Lambda resolves the Telegram identity and delegates to
-   `macro_bot.serverless_service.NutritionService`.
-5. Mutating responses are marked `no-store`; the API origin request policy
-   forwards the Telegram auth header, content type, accept header, and query
-   strings, without cookies.
+3. In Telegram, non-empty `initData` is validated in `lambda_handlers/api.py`
+   using the `X-Telegram-Init-Data` header. Invalid non-empty data is rejected
+   and never downgraded to browser-session authentication.
+4. Outside Telegram, the app calls `GET /api/auth/session`. If there is no
+   valid `jf_session` cookie, it shows the browser-only login form. `POST
+   /api/auth/login` verifies a known username/password and sets the cookie;
+   `POST /api/auth/logout` revokes the server-side session and expires it.
+5. Both paths resolve to the same `ServerlessIdentity`, and the API delegates
+   to `macro_bot.serverless_service.NutritionService`. Domain services do not
+   branch on the authentication method.
+6. Mutating responses are marked `no-store`; the API origin request policy
+   forwards only the `jf_session` cookie, the Telegram auth header, content
+   type, accept, Origin, Referer, and query strings. The managed
+   CachingDisabled cache policy remains in use for `/api/*`.
+
+### Browser credentials and sessions
+
+Browser access is restricted to credentials provisioned for known users. The
+Telegram identity remains canonical: provisioning takes an existing Telegram
+user id, reads its existing identity record, and stores the resulting internal
+`user_id` in the web credential record. A browser login never creates a new
+application user or copies profile, meal, target, programme, or workout data.
+
+The retained `FitnessDataTable` uses these isolated single-table records:
+
+| Entity | Key shape | Retention |
+| --- | --- | --- |
+| Web credential | `PK=WEB_CREDENTIAL#<sha256(username)>`, `SK=META` | Permanent; no `expires_at` |
+| Browser session | `PK=WEB_SESSION#<sha256(opaque token)>`, `SK=META` | 30 days via `expires_at` TTL |
+
+Credential records contain only the normalized username, canonical
+`user_id`/Telegram id mapping, and versioned PBKDF2-HMAC-SHA256 material: a
+random salt, iteration count, algorithm/version, and derived hash. Passwords
+are never stored or logged. Session tokens are generated with cryptographic
+randomness, are sent only in an `HttpOnly; Secure; SameSite=Strict; Path=/`
+cookie, and are represented server-side by their hash. Logout deletes the
+session record. A valid session re-reads the canonical Telegram identity and
+requires its stored internal `user_id` to match the session mapping.
 
 ### Workout flow
 
@@ -179,8 +211,17 @@ assets. CloudWatch Lambda log groups retain logs for 14 days.
 - No secret values belong in Git, deployment output, or operational reports.
 - The Mini App bucket blocks public access and accepts reads only from the
   CloudFront distribution through its OAC policy.
-- API requests require valid Telegram launch/init data and use user-scoped
-  records.
+- API requests require valid Telegram launch/init data or a valid browser
+  session and use user-scoped records. A Telegram user id by itself is never
+  accepted as proof of identity.
+- Browser cookie mutations require the configured `MINI_APP_URL` Origin or
+  Referer. `SameSite=Strict` and same-origin fetches provide the normal browser
+  boundary; Telegram init-data mutations are unaffected by this browser CSRF
+  check.
+- Login failures are generic and logged only with short fingerprints. The
+  application deliberately does not add a stateful per-IP rate-limit service
+  for this private two-user deployment; API Gateway/CloudFront controls and
+  operational log monitoring remain the abuse-protection boundary.
 - Logs use user fingerprints where telemetry needs correlation and avoid raw
   identifiers, payloads, and secrets.
 

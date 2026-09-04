@@ -178,6 +178,23 @@ class WorkoutExecutionRepository:
     def _now(self) -> str:
         return utc_iso(self.repository._now())
 
+    @staticmethod
+    def _resolved_working_sets(sets: list[Mapping[str, Any]]) -> list[Mapping[str, Any]]:
+        """Return working sets that resolve a prescribed working-set slot.
+
+        Older persisted sets may not have ``set_type`` or ``status``. They were
+        completed sets by definition, so retain their historical meaning while
+        excluding warm-ups from completion requirements.
+        """
+
+        return [
+            item
+            for item in sets
+            if str(item.get("set_type", "working")).strip().lower() == "working"
+            and str(item.get("status", SET_STATUS_COMPLETED)).strip().lower()
+            in {SET_STATUS_COMPLETED, SET_STATUS_SKIPPED}
+        ]
+
     def start_session(self, identity: ServerlessIdentity, day_code: str, *, actual_local_date: date | str) -> dict[str, Any]:
         active = self._active_item(identity)
         if active:
@@ -537,7 +554,7 @@ class WorkoutExecutionRepository:
                 continue
             sets = self._set_items(identity, execution)
             minimum_sets = max(1, int(execution.get("prescribed_set_count_min") or 1))
-            if len(sets) < minimum_sets:
+            if len(self._resolved_working_sets(sets)) < minimum_sets:
                 blockers.append(str(execution.get("prescription_sequence", "exercise")))
         if blockers:
             exercises = ", ".join(blockers)

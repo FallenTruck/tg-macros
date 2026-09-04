@@ -6,6 +6,7 @@ from unittest.mock import patch
 from fastapi.testclient import TestClient
 
 from lambda_handlers import api
+from lambda_handlers.api import _choice_changes
 from macro_bot.serverless_data import DynamoNutritionRepository
 from macro_bot.serverless_service import NutritionService
 from macro_bot.workout_execution import InvalidWorkoutInput, WorkoutConflict, WorkoutNotFound
@@ -258,6 +259,51 @@ class WorkoutExecutionTests(unittest.TestCase):
         self.assertEqual(item["status"], "skipped")
         self.assertEqual(item["skip_reason"], "time_constraint")
         self.assertIsNone(item["reps"])
+
+    def test_completion_ignores_warmups_but_resolves_skipped_working_sets(self):
+        payload = self.start()
+        session_id = self.session_id(payload)
+        first = payload["executions"][0]
+        minimum_sets = int(first["prescribed_set_count_min"])
+
+        for ordinal in range(1, minimum_sets + 1):
+            self.service.put_workout_set(
+                self.identity(), session_id, first["execution_id"], ordinal,
+                {"set_type": "warmup", "load_value": 20, "reps": 8, "execution_expected_revision": ordinal},
+            )
+        for execution in payload["executions"][1:]:
+            self.service.skip_workout_exercise(
+                self.identity(), session_id, execution["execution_id"],
+                {"skip_reason": "intentionally_skipped", "expected_revision": 1},
+            )
+
+        with self.assertRaisesRegex(WorkoutConflict, "Log or skip every exercise"):
+            self.service.complete_workout(self.identity(), session_id, {"expected_revision": 1})
+
+        for ordinal in range(minimum_sets + 1, (minimum_sets * 2) + 1):
+            self.service.skip_workout_set(
+                self.identity(), session_id, first["execution_id"], ordinal,
+                {"skip_reason": "fatigue", "set_type": "working", "execution_expected_revision": ordinal},
+            )
+        completed = self.service.complete_workout(self.identity(), session_id, {"expected_revision": 1})
+
+        self.assertEqual(completed["session"]["status"], "completed")
+        self.assertEqual(completed["executions"][0]["status"], "completed")
+        self.assertEqual(
+            [item["set_type"] for item in completed["executions"][0]["sets"]],
+            ["warmup"] * minimum_sets + ["working"] * minimum_sets,
+        )
+
+    def test_choice_change_probe_only_handles_missing_workout(self):
+        with patch.object(self.service, "workout_session", side_effect=WorkoutNotFound("missing")):
+            self.assertTrue(_choice_changes(self.service, self.identity(), "missing", "execution", {"performed_exercise_id": "face_pull"}))
+
+    def test_choice_change_probe_does_not_mask_unexpected_failure(self):
+        failure = RuntimeError("database unavailable")
+        with patch.object(self.service, "workout_session", side_effect=failure):
+            with self.assertRaises(RuntimeError) as raised:
+                _choice_changes(self.service, self.identity(), "session", "execution", {"performed_exercise_id": "face_pull"})
+        self.assertIs(raised.exception, failure)
 
     def test_cross_user_session_access_is_rejected(self):
         payload = self.start(101)

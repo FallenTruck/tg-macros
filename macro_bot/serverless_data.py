@@ -20,6 +20,7 @@ from zoneinfo import ZoneInfo
 from boto3.dynamodb.conditions import Attr, Key
 from boto3.dynamodb.types import TypeSerializer
 
+from .serverless_auth import browser_session_token_hash, normalize_web_username, web_credential_key
 from .models import (
     DailyMacroSummary,
     LoggedMealRow,
@@ -46,6 +47,7 @@ ACTION_TTL_SECONDS = 60 * 60
 # observe them before DynamoDB's asynchronous TTL deletion.
 ACTION_RECORD_RETENTION_SECONDS = 7 * 24 * 60 * 60
 MINI_APP_LAUNCH_TTL_SECONDS = 15 * 60
+BROWSER_SESSION_TTL_SECONDS = 30 * 24 * 60 * 60
 
 
 class DataError(RuntimeError):
@@ -70,6 +72,12 @@ class ActionFinalized(DataError):
 
 class ProgrammeSeedConflict(DataError):
     """Raised when a deterministic programme key contains different data."""
+
+    pass
+
+
+class WebCredentialExists(DataError):
+    """Raised when provisioning would replace a credential without consent."""
 
     pass
 
@@ -268,6 +276,7 @@ class DynamoNutritionRepository:
         now_fn: Any = utc_now,
         identity_id_factory: Any = lambda: uuid.uuid4().hex,
         token_factory: Any = lambda: secrets.token_urlsafe(18),
+        session_token_factory: Any = lambda: secrets.token_urlsafe(32),
     ):
         if table is None:
             import boto3
@@ -295,6 +304,7 @@ class DynamoNutritionRepository:
         self.now_fn = now_fn
         self.identity_id_factory = identity_id_factory
         self.token_factory = token_factory
+        self.session_token_factory = session_token_factory
 
     def _now(self) -> datetime:
         value = self.now_fn()
@@ -484,6 +494,128 @@ class DynamoNutritionRepository:
                 ),
             )
         return ServerlessIdentity(telegram_user_id, user_id, new_username, new_display_name, created_at, now)
+
+    def get_identity(self, telegram_user_id: int) -> Optional[ServerlessIdentity]:
+        """Read an existing Telegram identity without creating one."""
+
+        telegram_user_id = int(telegram_user_id)
+        if telegram_user_id <= 0:
+            return None
+        item = self._get({"PK": f"IDENTITY#TELEGRAM#{telegram_user_id}", "SK": "USER"})
+        if not item:
+            return None
+        now = utc_iso(self._now())
+        return ServerlessIdentity(
+            telegram_user_id=telegram_user_id,
+            user_id=str(item.get("user_id", "")),
+            username=str(item.get("username", "") or ""),
+            display_name=str(item.get("display_name", "") or ""),
+            created_at=str(item.get("created_at", now)),
+            updated_at=str(item.get("updated_at", item.get("created_at", now))),
+        )
+
+    # ---- Browser credentials and sessions ------------------------------------
+
+    def get_web_credential(self, username: Any) -> Optional[dict[str, Any]]:
+        """Return a browser credential record without exposing its lookup key."""
+
+        normalized = normalize_web_username(username)
+        item = self._get({"PK": web_credential_key(normalized), "SK": "META"})
+        if not item:
+            return None
+        payload = _from_storage(item)
+        if payload.get("entity_type") != "web_credential":
+            return None
+        payload["username"] = normalized
+        return payload
+
+    def save_web_credential(
+        self,
+        username: Any,
+        *,
+        identity: ServerlessIdentity,
+        password_record: Mapping[str, Any],
+        replace: bool = False,
+    ) -> dict[str, Any]:
+        """Persist only hashed credential material for an existing identity."""
+
+        normalized = normalize_web_username(username)
+        item = {
+            "PK": web_credential_key(normalized),
+            "SK": "META",
+            "entity_type": "web_credential",
+            "username": normalized,
+            "user_id": identity.user_id,
+            "telegram_user_id": identity.telegram_user_id,
+            "created_at": utc_iso(self._now()),
+            "updated_at": utc_iso(self._now()),
+            **dict(password_record),
+        }
+        try:
+            self.table.put_item(
+                Item=_to_storage(item),
+                **({} if replace else {"ConditionExpression": "attribute_not_exists(PK)"}),
+            )
+        except Exception as err:
+            if not replace and _is_conditional_failure(err):
+                raise WebCredentialExists("browser username already exists") from err
+            raise
+        return item
+
+    def create_browser_session(
+        self,
+        identity: ServerlessIdentity,
+        *,
+        ttl_seconds: int = BROWSER_SESSION_TTL_SECONDS,
+    ) -> tuple[str, dict[str, Any]]:
+        """Create an opaque, server-side browser session with DynamoDB TTL."""
+
+        now = self._now()
+        for _attempt in range(3):
+            token = str(self.session_token_factory() or "")
+            if not token:
+                continue
+            item = {
+                "PK": f"WEB_SESSION#{browser_session_token_hash(token)}",
+                "SK": "META",
+                "entity_type": "browser_session",
+                "user_id": identity.user_id,
+                "telegram_user_id": identity.telegram_user_id,
+                "created_at": utc_iso(now),
+                "expires_at": epoch_seconds(now) + int(ttl_seconds),
+                "active": True,
+            }
+            try:
+                self.table.put_item(Item=_to_storage(item), ConditionExpression="attribute_not_exists(PK)")
+                return token, item
+            except Exception as err:
+                if not _is_conditional_failure(err):
+                    raise
+        raise DataError("could not allocate browser session")
+
+    def get_browser_session(self, token: Any) -> Optional[dict[str, Any]]:
+        """Return a non-expired, non-revoked browser session."""
+
+        token = str(token or "")
+        if not token or len(token) > 512:
+            return None
+        item = self._get({"PK": f"WEB_SESSION#{browser_session_token_hash(token)}", "SK": "META"})
+        if not item:
+            return None
+        payload = _from_storage(item)
+        if payload.get("entity_type") != "browser_session" or payload.get("active", True) is False:
+            return None
+        if int(payload.get("expires_at", 0) or 0) <= epoch_seconds(self._now()):
+            return None
+        return payload
+
+    def revoke_browser_session(self, token: Any) -> None:
+        """Revoke a browser session by deleting its server-side record."""
+
+        token = str(token or "")
+        if not token or len(token) > 512:
+            return
+        self.table.delete_item(Key={"PK": f"WEB_SESSION#{browser_session_token_hash(token)}", "SK": "META"})
 
     def get_profile(self, user_id: str) -> Optional[UserProfile]:
         item = self._get({"PK": f"USER#{user_id}", "SK": "PROFILE"})

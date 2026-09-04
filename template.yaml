@@ -284,14 +284,18 @@ Resources:
     Properties:
       OriginRequestPolicyConfig:
         Name: !Sub ${AWS::StackName}-api-origin
-        Comment: Forward only application headers and query strings to HTTP API
+        Comment: Forward only application headers, browser session, and query strings to HTTP API
         CookiesConfig:
-          CookieBehavior: none
+          CookieBehavior: whitelist
+          Cookies:
+            - jf_session
         HeadersConfig:
           HeaderBehavior: whitelist
           Headers:
             - Accept
             - Content-Type
+            - Origin
+            - Referer
             - X-Telegram-Init-Data
         QueryStringsConfig:
           QueryStringBehavior: all
