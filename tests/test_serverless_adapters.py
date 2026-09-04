@@ -4,16 +4,16 @@ import json
 import unittest
 from datetime import datetime, timezone
 from types import SimpleNamespace
-from unittest.mock import patch
+from unittest.mock import AsyncMock, patch
 
 from fastapi.testclient import TestClient
 from PIL import Image
 
 from lambda_handlers import api
-from lambda_handlers.worker import process_update_message
+from lambda_handlers.worker import handler, process_update_message
 from macro_bot.direct_estimator import EstimationResult
 from macro_bot.models import PendingMealAction
-from macro_bot.serverless_data import FinalizeResult, ServerlessIdentity
+from macro_bot.serverless_data import ActionExpired, FinalizeResult, ServerlessIdentity
 from tests.test_serverless_auth import _init_data
 from tests.test_serverless_data import _estimate
 
@@ -98,7 +98,7 @@ class _FakeWorkerService:
 
         self.repository = Repo(self)
 
-    def create_mini_app_launch(self, token, *, identity, chat_id, chat_type, message_id):
+    def create_mini_app_launch(self, token, *, identity, chat_id, chat_type, message_id, launch_type="nutrition", requested_day=None):
         self.launch_context = {
             "token": token,
             "telegram_user_id": identity.telegram_user_id,
@@ -108,6 +108,8 @@ class _FakeWorkerService:
             "message_id": message_id,
             "created_at_epoch": 1_000,
             "expires_at": 1_900,
+            "launch_type": launch_type,
+            "requested_day": requested_day or "",
         }
         return self.launch_context
 
@@ -169,8 +171,14 @@ class _FakeWorkerService:
         return self.action
 
     def finalize_action(self, identity, token, operation):
+        if self.action.expires_at <= 1:
+            raise ActionExpired("Meal action expired")
         self.action.status = "confirmed" if operation == "confirm" else "cancelled"
         return FinalizeResult(self.action.status, self.action, None, duplicate=False)
+
+    def auto_confirm_expired_action(self, identity, token):
+        self.action.status = "confirmed"
+        return FinalizeResult("confirmed", self.action, None, duplicate=False)
 
     def recommendation(self, identity):
         raise KeyError("profile missing")
@@ -254,6 +262,83 @@ class ServerlessAdapterTests(unittest.TestCase):
         self.assertIn("user_fingerprint=", log_text)
         self.assertNotIn("telegram_user_id=101", log_text)
 
+    def test_expired_meal_callback_auto_logs_and_removes_buttons(self):
+        service = _FakeWorkerService()
+        service.action = PendingMealAction(
+            token="expired-token",
+            chat_id=99,
+            request_message_id=12,
+            telegram_user_id=101,
+            username="a",
+            caption="expired bowl",
+            estimate=_estimate(),
+            expires_at=1,
+            message_id=500,
+        )
+        bot = _FakeBot(_jpg_bytes())
+        asyncio.run(
+            process_update_message(
+                {
+                    "update_id": 5,
+                    "payload": {
+                        "callback_query": {
+                            "id": "callback-1",
+                            "from": {"id": 101},
+                            "data": "meal:v1:confirm:expired-token",
+                            "message": {"message_id": 500, "chat": {"id": 99, "type": "private"}},
+                        }
+                    },
+                },
+                service=service,
+                bot=bot,
+                estimator=_FakeEstimator(),
+            )
+        )
+
+        self.assertEqual(service.action.status, "confirmed")
+        self.assertEqual(bot.edited[-1]["reply_markup"], None)
+        self.assertIn("Logged automatically after timeout", bot.edited[-1]["text"])
+
+    def test_scheduled_expiry_sweep_is_invoked_without_sqs_payload(self):
+        with patch("lambda_handlers.worker._expire_meal_actions", new=AsyncMock(return_value=2)):
+            result = handler({"source": "aws.events"}, None)
+
+        self.assertEqual(result, {"expired_actions": 2})
+
+    def test_worker_workout_command_uses_group_safe_launch_context_without_private_details(self):
+        service = _FakeWorkerService()
+        bot = _FakeBot(_jpg_bytes())
+        with self.assertLogs("lambda_handlers.worker", level="INFO") as captured:
+            asyncio.run(
+                process_update_message(
+                    {
+                        "update_id": 4,
+                        "payload": {"message": {"message_id": 14, "chat": {"id": -99, "type": "group"}, "from": {"id": 101}, "text": "/workout PULL"}},
+                    },
+                    service=service,
+                    bot=bot,
+                    estimator=_FakeEstimator(),
+                )
+            )
+        self.assertEqual(service.launch_context["launch_type"], "workout")
+        self.assertEqual(service.launch_context["requested_day"], "PULL")
+        self.assertIn("t.me/javaanfitnessbot?startapp=", bot.sent[-1]["text"])
+        self.assertNotIn("kg", bot.sent[-1]["text"])
+        self.assertNotIn("RIR", bot.sent[-1]["text"])
+        log_text = "\n".join(captured.output)
+        for event in (
+            "telegram_command_dispatch",
+            "workout_command_start",
+            "workout_launch_context_created",
+            "workout_direct_link_built",
+            "workout_telegram_reply_start",
+            "workout_telegram_reply_complete",
+        ):
+            self.assertIn(event, log_text)
+        self.assertNotIn(service.launch_context["token"], log_text)
+        self.assertNotIn("-99", log_text)
+        self.assertNotIn("telegram_user_id=101", log_text)
+
     def test_openapp_group_uses_opaque_mini_app_direct_link_and_persists_context(self):
         service = _FakeWorkerService()
         bot = _FakeBot(_jpg_bytes())
@@ -310,6 +395,8 @@ class ServerlessAdapterTests(unittest.TestCase):
             "chat_type": "group",
             "expires_at": 9_999_999_999,
             "active": True,
+            "launch_type": "workout",
+            "requested_day": "PULL",
         }
         client = TestClient(api.app)
         valid = _init_data(init_fields={"start_param": "opaque-token", "chat_type": "group", "chat_instance": "opaque-chat"})
@@ -317,8 +404,16 @@ class ServerlessAdapterTests(unittest.TestCase):
         with patch.object(api, "_service", return_value=service), patch.object(
             api, "bot_token_from_environment", return_value="test-token"
         ):
-            self.assertEqual(client.get("/api/profile", headers={"X-Telegram-Init-Data": valid}).status_code, 200)
+            with self.assertLogs("lambda_handlers.api", level="INFO") as captured:
+                response = client.get("/api/profile", headers={"X-Telegram-Init-Data": valid})
+            self.assertEqual(response.status_code, 200)
+            self.assertEqual(response.json()["launch_context"], {"launch_type": "workout", "requested_day": "PULL"})
             self.assertEqual(client.get("/api/profile", headers={"X-Telegram-Init-Data": other_user}).status_code, 403)
+        log_text = "\n".join(captured.output)
+        self.assertIn("miniapp_auth_success", log_text)
+        self.assertIn("miniapp_launch_context_resolved", log_text)
+        self.assertNotIn("opaque-token", log_text)
+        self.assertNotIn(valid, log_text)
 
     def test_start_param_without_signed_init_data_does_not_authenticate(self):
         service = _FakeApiService()

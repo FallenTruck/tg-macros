@@ -5,12 +5,22 @@ const HOME_VIEW = "home";
 const PROFILE_VIEW = "profile";
 const QUESTIONNAIRE_VIEW = "questionnaire";
 const WORKOUT_VIEW = "workout";
+const WORKOUT_SKIP_REASONS = [
+  ["recently_trained", "Recently trained"],
+  ["time_constraint", "Time constraint"],
+  ["equipment_unavailable", "Equipment unavailable"],
+  ["fatigue", "Fatigue"],
+  ["discomfort", "Discomfort"],
+  ["intentionally_skipped", "Just skip"],
+  ["other", "Other"],
+];
 
 const state = {
   meta: null,
   profile: null,
   preview: null,
   workoutProgramme: null,
+  activeWorkout: null,
   viewer: buildViewerFromTelegram(tg?.initDataUnsafe?.user ?? null),
   hasAuth: Boolean(initData),
   activeView: HOME_VIEW,
@@ -34,6 +44,7 @@ const profileView = document.querySelector("#profile-view");
 const questionnaireView = document.querySelector("#questionnaire-view");
 const workoutView = document.querySelector("#workout-view");
 const workoutProgrammeEl = document.querySelector("#workout-programme");
+const workoutSessionEl = document.querySelector("#workout-session");
 const workoutVersionMeta = document.querySelector("#workout-version-meta");
 
 const welcomeTitle = document.querySelector("#welcome-title");
@@ -66,6 +77,12 @@ if (tg) {
 }
 
 window.addEventListener("hashchange", syncRoute);
+
+workoutProgrammeEl?.addEventListener("click", handleWorkoutClick);
+workoutProgrammeEl?.addEventListener("change", handleWorkoutChange);
+workoutSessionEl?.addEventListener("click", handleWorkoutClick);
+workoutSessionEl?.addEventListener("change", handleWorkoutChange);
+workoutSessionEl?.addEventListener("submit", handleWorkoutSubmit);
 
 form.addEventListener("input", () => {
   state.preview = null;
@@ -178,6 +195,10 @@ async function bootstrap() {
     renderWorkoutProgramme();
     setStatus("", "neutral");
     await loadWorkoutProgramme();
+    await loadActiveWorkout();
+    if (response.launch_context?.launch_type === "workout") {
+      navigateTo(WORKOUT_VIEW);
+    }
   } catch (error) {
     setStatus(
       error.message || "Could not load your saved target. You can still fill in the questionnaire.",
@@ -194,6 +215,19 @@ async function loadWorkoutProgramme() {
     renderWorkoutProgramme();
   } catch (error) {
     workoutProgrammeEl.innerHTML = `<section class="panel profile-panel"><p class="summary-empty">${escapeHtml(error.message || "Could not load the workout programme.")}</p></section>`;
+  }
+}
+
+async function loadActiveWorkout() {
+  try {
+    const response = await apiFetch("/api/workout/sessions/active");
+    state.activeWorkout = response.session || null;
+    renderWorkoutSession();
+    renderWorkoutProgramme();
+  } catch (error) {
+    if (workoutSessionEl) {
+      workoutSessionEl.innerHTML = `<section class="panel profile-panel"><p class="summary-empty">${escapeHtml(error.message || "Could not load the active workout.")}</p></section>`;
+    }
   }
 }
 
@@ -258,7 +292,7 @@ function normalizeRoute(hash = window.location.hash) {
 }
 
 function navigateTo(view) {
-  const route = view === QUESTIONNAIRE_VIEW || view === PROFILE_VIEW ? view : HOME_VIEW;
+  const route = view === QUESTIONNAIRE_VIEW || view === PROFILE_VIEW || view === WORKOUT_VIEW ? view : HOME_VIEW;
   const targetHash = `#${route}`;
   if (window.location.hash === targetHash) {
     renderRoute(route);
@@ -323,11 +357,200 @@ function renderWorkoutProgramme() {
         <p>Flexible date</p>
       </div>
       <p class="workout-day-note">${escapeHtml(day.notes || "")}</p>
+      ${workoutDayAction(day)}
       <ol class="workout-prescription-list">
         ${(day.prescriptions || []).map((prescription) => renderPrescription(prescription, exercises)).join("")}
       </ol>
     </section>
   `).join("");
+}
+
+function workoutDayAction(day) {
+  const activeSession = state.activeWorkout?.session;
+  const isActiveDay = activeSession?.programme_day_id === day.day_code;
+  const label = activeSession ? (isActiveDay ? "Resume Workout" : "Workout already active") : `Start ${day.display_name || day.day_code}`;
+  const disabled = activeSession && !isActiveDay ? " disabled" : "";
+  return `<button class="primary workout-start-button" type="button" data-action="start-workout" data-workout-day="${escapeHtml(day.day_code)}"${disabled}>${escapeHtml(label)}</button>`;
+}
+
+function renderWorkoutSession() {
+  if (!workoutSessionEl) {
+    return;
+  }
+  const active = state.activeWorkout;
+  if (!active?.session) {
+    workoutSessionEl.innerHTML = "";
+    return;
+  }
+  const exercises = Object.fromEntries((state.workoutProgramme?.exercises || []).map((item) => [item.exercise_id, item]));
+  const session = active.session;
+  workoutSessionEl.innerHTML = `
+    <section class="panel workout-session-panel">
+      <div class="panel-head">
+        <div>
+          <p class="section-label">In progress</p>
+          <h3>${escapeHtml(session.programme_day_id)} workout</h3>
+        </div>
+        <button class="ghost-button" type="button" data-action="cancel-workout">Cancel</button>
+      </div>
+      <p class="workout-day-note">Started ${escapeHtml(formatIso(session.started_at))}. Your entries are saved as you go.</p>
+      <div class="workout-execution-list">
+        ${(active.executions || []).map((execution) => renderWorkoutExecution(execution, exercises)).join("")}
+      </div>
+    </section>
+  `;
+}
+
+function renderWorkoutExecution(execution, exercises) {
+  const exercise = exercises[execution.performed_exercise_id] || {};
+  const options = (execution.allowed_exercise_ids || []).map((id) => exercises[id]).filter(Boolean);
+  const target = execution.execution_type === "timed"
+    ? `${execution.prescribed_set_count_min}–${execution.prescribed_set_count_max} sets · timed`
+    : execution.prescribed_min_reps == null
+      ? `${execution.prescribed_set_count_min}–${execution.prescribed_set_count_max} sets`
+      : `${execution.prescribed_set_count_min}–${execution.prescribed_set_count_max} sets · ${execution.prescribed_min_reps}–${execution.prescribed_max_reps} reps`;
+  const status = execution.status === "skipped" ? `<p class="workout-skipped">Skipped: ${escapeHtml(execution.skip_reason)}</p>` : "";
+  const choice = options.length > 1 ? `
+    <label class="workout-choice-label">Exercise
+      <select data-action="choose-exercise" data-execution-id="${escapeHtml(execution.execution_id)}" data-session-id="${escapeHtml(execution.session_id)}">
+        ${options.map((item) => `<option value="${escapeHtml(item.exercise_id)}"${item.exercise_id === execution.performed_exercise_id ? " selected" : ""}>${escapeHtml(item.canonical_name)}</option>`).join("")}
+      </select>
+    </label>` : `<p class="workout-exercise-name">${escapeHtml(exercise.canonical_name || execution.performed_exercise_id)}</p>`;
+  const sets = (execution.sets || []).map((set) => `
+    <div class="workout-set-row">
+      <span>Set ${set.set_ordinal}</span>
+      <strong>${escapeHtml(formatSetResult(set))}</strong>
+      <span>${set.status === "skipped" ? "Skipped" : "Saved"}</span>
+    </div>`).join("");
+  const nextOrdinal = Math.max(0, ...(execution.sets || []).map((item) => Number(item.set_ordinal) || 0)) + 1;
+  const setForm = execution.status === "skipped" ? "" : renderSetForm(execution, nextOrdinal);
+  const skipControls = execution.status === "skipped" ? "" : renderSkipControls(
+    "exercise",
+    `data-session-id="${escapeHtml(execution.session_id)}" data-execution-id="${escapeHtml(execution.execution_id)}" data-revision="${execution.revision}"`,
+  );
+  return `<article class="workout-execution-card">
+    <div class="workout-execution-head">
+      <div><span class="section-label">Exercise ${execution.prescription_sequence}</span>${choice}<p class="workout-target">${escapeHtml(target)}</p></div>
+      ${skipControls}
+    </div>
+    ${status}
+    <div class="workout-set-list">${sets}</div>
+    ${setForm}
+  </article>`;
+}
+
+function renderSkipControls(kind, buttonAttributes) {
+  const label = kind === "set" ? "Reason for skipping set" : "Reason for skipping exercise";
+  const options = WORKOUT_SKIP_REASONS.map(([value, text]) => `<option value="${value}"${value === "intentionally_skipped" ? " selected" : ""}>${text}</option>`).join("");
+  return `<div class="workout-skip-controls"><select data-skip-reason-select aria-label="${label}">${options}</select><button class="ghost-button" type="button" data-action="skip-${kind}" ${buttonAttributes}>${kind === "set" ? "Skip set" : "Skip"}</button></div>`;
+}
+
+function renderSetForm(execution, ordinal) {
+  const prefix = `data-session-id="${escapeHtml(execution.session_id)}" data-execution-id="${escapeHtml(execution.execution_id)}" data-ordinal="${ordinal}"`;
+  let fields = "";
+  if (execution.execution_type === "timed") {
+    fields = `<label>Seconds<input name="duration_seconds" type="number" min="1" inputmode="numeric" required></label>`;
+  } else if (execution.execution_type === "side_aware_reps") {
+    fields = `<label>Load (kg)<input name="load_value" type="number" min="0" step="0.25" inputmode="decimal" required></label><label>Left reps<input name="left_reps" type="number" min="1" inputmode="numeric" required></label><label>Right reps<input name="right_reps" type="number" min="1" inputmode="numeric" required></label>`;
+  } else {
+    const load = execution.loading_convention === "per_dumbbell_kg" ? "Weight per dumbbell (kg)" : "Load (kg)";
+    fields = execution.execution_type === "loaded_reps" ? `<label>${load}<input name="load_value" type="number" min="0" step="0.25" inputmode="decimal" required></label>` : "";
+    fields += `<label>Reps<input name="reps" type="number" min="1" inputmode="numeric" required></label>`;
+  }
+  if (execution.execution_type !== "timed") {
+    fields += `<label>RIR <span class="optional-label">optional</span><input name="rir" type="number" min="0" max="10" step="0.5" inputmode="decimal"></label>`;
+  }
+  const skipControls = renderSkipControls(
+    "set",
+    `${prefix} data-execution-revision="${execution.revision}"`,
+  );
+  return `<form class="workout-set-form" data-set-form ${prefix} data-execution-revision="${execution.revision}"><div class="workout-set-fields">${fields}</div><div class="workout-set-actions"><button class="primary" type="submit">Save set ${ordinal}</button>${skipControls}</div></form>`;
+}
+
+function formatSetResult(set) {
+  if (set.status === "skipped") return set.skip_reason || "Skipped";
+  if (set.duration_seconds != null) return `${set.duration_seconds}s`;
+  if (set.side_reps) return `${set.load_value ?? ""} kg · L ${set.side_reps.left} / R ${set.side_reps.right}`;
+  if (set.load_value != null) return `${set.load_value} kg × ${set.reps}`;
+  return `${set.reps} reps`;
+}
+
+async function handleWorkoutClick(event) {
+  const button = event.target.closest("[data-action]");
+  if (!button || button.disabled) return;
+  const action = button.dataset.action;
+  try {
+    if (action === "start-workout") {
+      const response = await apiFetch("/api/workout/sessions", {method: "POST", body: JSON.stringify({day_code: button.dataset.workoutDay})});
+      state.activeWorkout = response.session;
+      renderWorkoutSession();
+      renderWorkoutProgramme();
+      setStatus("Workout saved. Log each set as you complete it.", "success");
+      return;
+    }
+    if (action === "skip-exercise") {
+      const reasonSelect = button.closest(".workout-skip-controls")?.querySelector("[data-skip-reason-select]");
+      const response = await apiFetch(`/api/workout/sessions/${encodeURIComponent(button.dataset.sessionId)}/executions/${encodeURIComponent(button.dataset.executionId)}/skip`, {method: "POST", body: JSON.stringify({skip_reason: reasonSelect?.value || "intentionally_skipped", expected_revision: Number(button.dataset.revision)})});
+      state.activeWorkout = response;
+      renderWorkoutSession();
+      return;
+    }
+    if (action === "skip-set") {
+      const reasonSelect = button.closest(".workout-skip-controls")?.querySelector("[data-skip-reason-select]");
+      const response = await apiFetch(`/api/workout/sessions/${encodeURIComponent(button.dataset.sessionId)}/executions/${encodeURIComponent(button.dataset.executionId)}/sets/${button.dataset.ordinal}/skip`, {method: "POST", body: JSON.stringify({skip_reason: reasonSelect?.value || "intentionally_skipped", execution_expected_revision: Number(button.dataset.executionRevision)})});
+      state.activeWorkout = response;
+      renderWorkoutSession();
+      return;
+    }
+    if (action === "cancel-workout") {
+      const response = await apiFetch(`/api/workout/sessions/${encodeURIComponent(state.activeWorkout.session.session_id)}/cancel`, {method: "POST", body: JSON.stringify({expected_revision: state.activeWorkout.session.revision})});
+      state.activeWorkout = null;
+      renderWorkoutSession();
+      renderWorkoutProgramme();
+      setStatus("Workout cancelled. Your saved history remains intact.", "info");
+      return response;
+    }
+  } catch (error) {
+    setStatus(error.message || "Could not update the workout.", "error");
+  }
+}
+
+async function handleWorkoutChange(event) {
+  const select = event.target.closest('[data-action="choose-exercise"]');
+  if (!select) return;
+  try {
+    const response = await apiFetch(`/api/workout/sessions/${encodeURIComponent(select.dataset.sessionId)}/executions/${encodeURIComponent(select.dataset.executionId)}`, {method: "PUT", body: JSON.stringify({performed_exercise_id: select.value, expected_revision: Number((state.activeWorkout.executions.find((item) => item.execution_id === select.dataset.executionId) || {}).revision)})});
+    state.activeWorkout = response;
+    renderWorkoutSession();
+  } catch (error) {
+    setStatus(error.message || "Could not select that exercise.", "error");
+  }
+}
+
+async function handleWorkoutSubmit(event) {
+  const formElement = event.target.closest("[data-set-form]");
+  if (!formElement) return;
+  event.preventDefault();
+  const execution = state.activeWorkout?.executions.find((item) => item.execution_id === formElement.dataset.executionId);
+  if (!execution) return;
+  const values = new FormData(formElement);
+  const payload = {
+    execution_expected_revision: Number(formElement.dataset.executionRevision),
+  };
+  if (values.get("load_value") !== null && values.get("load_value") !== "") payload.load_value = Number(values.get("load_value"));
+  if (values.get("reps") !== null && values.get("reps") !== "") payload.reps = Number(values.get("reps"));
+  if (values.get("left_reps") !== null && values.get("left_reps") !== "") payload.side_reps = {left: Number(values.get("left_reps")), right: Number(values.get("right_reps"))};
+  if (values.get("duration_seconds") !== null && values.get("duration_seconds") !== "") payload.duration_seconds = Number(values.get("duration_seconds"));
+  if (values.get("rir") !== null && values.get("rir") !== "") payload.rir = Number(values.get("rir"));
+  const existing = (execution.sets || []).find((item) => Number(item.set_ordinal) === Number(formElement.dataset.ordinal));
+  if (existing) payload.expected_revision = Number(existing.revision);
+  try {
+    const response = await apiFetch(`/api/workout/sessions/${encodeURIComponent(formElement.dataset.sessionId)}/executions/${encodeURIComponent(formElement.dataset.executionId)}/sets/${formElement.dataset.ordinal}`, {method: "PUT", body: JSON.stringify(payload)});
+    state.activeWorkout = response;
+    renderWorkoutSession();
+  } catch (error) {
+    setStatus(error.message || "Could not save the set.", "error");
+  }
 }
 
 function renderPrescription(prescription, exercises) {

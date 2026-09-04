@@ -652,6 +652,136 @@ button:disabled {
   padding: 22px;
 }
 
+.workout-session {
+  display: grid;
+  gap: 16px;
+  margin-top: 16px;
+}
+
+.workout-session-panel {
+  padding: 22px;
+}
+
+.workout-start-button {
+  width: 100%;
+  margin-top: 16px;
+}
+
+.workout-start-button:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+
+.workout-execution-list {
+  display: grid;
+  gap: 14px;
+  margin-top: 18px;
+}
+
+.workout-execution-card {
+  padding: 16px;
+  border: 1px solid var(--line);
+  border-radius: 20px;
+  background: var(--panel-soft);
+}
+
+.workout-execution-head,
+.workout-set-row,
+.workout-set-actions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.workout-skip-controls {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: end;
+  gap: 8px;
+  min-width: min(100%, 280px);
+}
+
+.workout-exercise-name,
+.workout-target,
+.workout-skipped {
+  margin: 6px 0 0;
+}
+
+.workout-target,
+.workout-skipped,
+.workout-set-row span,
+.workout-choice-label,
+.optional-label {
+  color: var(--muted);
+  font-size: 0.88rem;
+}
+
+.workout-choice-label {
+  display: grid;
+  gap: 5px;
+  margin-top: 6px;
+}
+
+.workout-choice-label select,
+.workout-set-form input,
+.workout-skip-controls select {
+  min-height: 42px;
+  padding: 8px 10px;
+  border: 1px solid var(--line-strong);
+  border-radius: 12px;
+  background: var(--panel-strong);
+  color: var(--ink);
+}
+
+.workout-set-list {
+  display: grid;
+  gap: 8px;
+  margin-top: 14px;
+}
+
+.workout-set-row {
+  justify-content: flex-start;
+  padding: 9px 10px;
+  border-radius: 12px;
+  background: rgba(255, 250, 244, 0.7);
+}
+
+.workout-set-row strong {
+  margin-right: auto;
+}
+
+.workout-set-form {
+  margin-top: 14px;
+}
+
+.workout-set-fields {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(105px, 1fr));
+  gap: 8px;
+}
+
+.workout-set-fields label {
+  display: grid;
+  gap: 5px;
+  color: var(--muted);
+  font-size: 0.82rem;
+}
+
+.workout-set-actions {
+  justify-content: flex-start;
+  margin-top: 10px;
+}
+
+.workout-set-actions button {
+  min-height: 42px;
+}
+
+.workout-skip-controls button {
+  min-height: 42px;
+  white-space: nowrap;
+}
+
 .workout-day-note,
 .workout-prescription-note {
   color: var(--muted);
@@ -804,5 +934,13 @@ button:disabled {
   .bottom-nav {
     width: min(100vw - 18px, 920px);
     bottom: 10px;
+  }
+
+  .workout-execution-head {
+    display: block;
+  }
+
+  .workout-skip-controls {
+    margin-top: 12px;
   }
 }

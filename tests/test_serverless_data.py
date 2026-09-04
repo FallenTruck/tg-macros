@@ -38,12 +38,38 @@ def _condition_matches(expression, item, names=None, values=None):
         return item is None
     if item is None:
         return False
+    if "revision = :expected_set" in expression:
+        if item.get("revision") != values.get(":expected_set"):
+            return False
+    elif "revision = :execution_expected" in expression:
+        if item.get("revision") != values.get(":execution_expected"):
+            return False
+    elif "revision = :expected" in expression and item.get("revision") != values.get(":expected"):
+        return False
+    if "session_id = :session_id" in expression and item.get("session_id") != values.get(":session_id"):
+        return False
+    if "#status <> :skipped" in expression and item.get(names.get("#status", "status")) == values.get(":skipped"):
+        return False
+    if "#status = :current" in expression and item.get(names.get("#status", "status")) != values.get(":current"):
+        return False
+    if "#status = :in_progress" in expression and item.get(names.get("#status", "status")) != values.get(":in_progress"):
+        return False
+    if ("status = :pending OR status = :in_progress" in expression or "#status = :pending OR #status = :in_progress" in expression) and item.get("status") not in {
+        values.get(":pending"), values.get(":in_progress")
+    }:
+        return False
     if "status = :processing" in expression:
         return item.get("status") == values.get(":processing")
     if "status = :pending" in expression:
-        return item.get("status") == values.get(":pending") and (
-            "expires_at" not in expression or item.get("expires_at", 0) > values.get(":now", 0)
-        )
+        if item.get("status") != values.get(":pending"):
+            return False
+        if "action_expires_at" in expression:
+            deadline = item.get("action_expires_at", item.get("expires_at", 0))
+            if " <= :now" in expression:
+                return deadline <= values.get(":now", 0)
+            if " > :now" in expression:
+                return deadline > values.get(":now", 0)
+        return "expires_at" not in expression or item.get("expires_at", 0) > values.get(":now", 0)
     if "state = :awaiting" in expression:
         return item.get("state") == values.get(":awaiting") and item.get("expires_at", 0) > values.get(":now", 0)
     if "state = :selected" in expression:
@@ -95,6 +121,8 @@ class _FakeClient:
                     name, value_name = [part.strip() for part in assignment.split("=", 1)]
                     item[names.get(name, name)] = values[value_name]
                 pending[item_key] = item
+            elif operation == "Delete":
+                pending.pop(item_key, None)
         self.table.items = pending
 
 
@@ -453,9 +481,54 @@ class ServerlessDataTests(unittest.TestCase):
         self.assertIsNone(self.repo.get_action(other, action.token))
         with self.assertRaises(ActionNotFound):
             self.repo.finalize_action(other, action.token, "confirm")
-        self.table.items[(owner.pk, f"ACTION#{action.token}")]["expires_at"] = 1
+        self.table.items[(owner.pk, f"ACTION#{action.token}")]["action_expires_at"] = 1
         with self.assertRaises(ActionExpired):
             self.repo.scale_action(owner, action.token, 1.2)
+
+    def test_expired_action_is_auto_confirmed_and_meal_is_logged(self):
+        identity = self.repo.resolve_identity(101, "u", "User")
+        action = self.repo.create_pending_meal(
+            identity,
+            chat_id=9,
+            request_message_id=12,
+            caption="expired bowl",
+            estimate=_estimate(),
+            action_ttl_seconds=-1,
+        )
+
+        result = self.repo.auto_confirm_expired_action(identity, action.token)
+
+        self.assertEqual(result.status, "confirmed")
+        self.assertFalse(result.duplicate)
+        self.assertEqual(result.meal.status, "confirmed")
+        self.assertEqual(round(result.meal.macros.calories), 500)
+        stored_action = self.table.items[(identity.pk, f"ACTION#{action.token}")]
+        self.assertEqual(stored_action["status"], "confirmed")
+        self.assertEqual(stored_action["finalization_reason"], "expired_auto_confirm")
+
+    def test_expiry_sweep_auto_confirms_expired_actions(self):
+        identity = self.repo.resolve_identity(101, "u", "User")
+        action = self.repo.create_pending_meal(
+            identity,
+            chat_id=9,
+            request_message_id=12,
+            caption="sweep bowl",
+            estimate=_estimate(),
+            action_ttl_seconds=-1,
+        )
+        self.table.scan = lambda **kwargs: {
+            "Items": [
+                copy.deepcopy(item)
+                for item in self.table.items.values()
+                if item.get("entity_type") == "meal_action" and item.get("status") == "pending"
+            ]
+        }
+
+        expired = self.repo.expire_pending_actions()
+
+        self.assertEqual([item.token for item in expired], [action.token])
+        self.assertEqual(self.repo.get_action(identity, action.token).status, "confirmed")
+        self.assertEqual(self.repo.get_meal(identity, action.meal_id).status, "confirmed")
 
     def test_local_day_boundaries_are_singapore_local(self):
         start, end = local_day_utc_bounds(datetime(2026, 1, 15).date(), "Asia/Singapore")

@@ -17,6 +17,7 @@ class RuntimeBundleTests(unittest.TestCase):
             "serverless_auth.py",
             "serverless_data.py",
             "serverless_service.py",
+            "workout_execution.py",
             "workout_programme.py",
         ]
         for name in module_names:

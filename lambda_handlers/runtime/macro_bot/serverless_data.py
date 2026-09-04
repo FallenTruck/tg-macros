@@ -42,6 +42,9 @@ logger = logging.getLogger(__name__)
 DEFAULT_TIMEZONE = "Asia/Singapore"
 WORKFLOW_TTL_SECONDS = 30 * 60
 ACTION_TTL_SECONDS = 60 * 60
+# Keep finalized action records around long enough for the expiry sweep to
+# observe them before DynamoDB's asynchronous TTL deletion.
+ACTION_RECORD_RETENTION_SECONDS = 7 * 24 * 60 * 60
 MINI_APP_LAUNCH_TTL_SECONDS = 15 * 60
 
 
@@ -499,6 +502,8 @@ class DynamoNutritionRepository:
         chat_id: int,
         chat_type: str,
         message_id: int,
+        launch_type: str = "nutrition",
+        requested_day: Optional[str] = None,
         ttl_seconds: int = MINI_APP_LAUNCH_TTL_SECONDS,
     ) -> dict[str, Any]:
         """Persist a short-lived, user-bound Mini App launch context."""
@@ -517,10 +522,13 @@ class DynamoNutritionRepository:
             "chat_id": int(chat_id),
             "chat_type": str(chat_type or ""),
             "message_id": int(message_id),
+            "launch_type": str(launch_type or "nutrition"),
             "created_at": utc_iso(now),
             "expires_at": epoch_seconds(now) + int(ttl_seconds),
             "active": True,
         }
+        if requested_day:
+            item["requested_day"] = str(requested_day).strip().upper()
         self.table.put_item(
             Item=_to_storage(item),
             ConditionExpression="attribute_not_exists(PK)",
@@ -732,7 +740,7 @@ class DynamoNutritionRepository:
         canonical_sk = f"MEAL#{eaten_iso}#{meal_id}"
         detail_prefix = f"MEAL_DETAIL#{eaten_iso}#{meal_id}"
         action_sk = f"ACTION#{token}"
-        expires_at = epoch_seconds(now) + int(action_ttl_seconds)
+        action_expires_at = epoch_seconds(now) + int(action_ttl_seconds)
         original_payload = _estimate_payload(estimate)
         traceability = {}
         if telegram_file_id:
@@ -828,7 +836,10 @@ class DynamoNutritionRepository:
             "adjustment_factor": 1.0,
             "created_at": utc_iso(now),
             "updated_at": utc_iso(now),
-            "expires_at": expires_at,
+            # `expires_at` is the DynamoDB TTL and deliberately outlives the
+            # action deadline so the scheduled sweep can finalize the meal.
+            "expires_at": action_expires_at + ACTION_RECORD_RETENTION_SECONDS,
+            "action_expires_at": action_expires_at,
             "update_id": update_id,
             "model_metadata": dict(model_metadata or {}),
             **traceability,
@@ -888,7 +899,7 @@ class DynamoNutritionRepository:
             self.table.update_item(
                 Key={"PK": identity.pk, "SK": f"ACTION#{token}"},
                 UpdateExpression="SET estimate = :estimate, adjustment_factor = :factor, updated_at = :updated",
-                ConditionExpression="#status = :pending AND expires_at > :now",
+                ConditionExpression=_pending_action_live_condition(),
                 ExpressionAttributeNames={"#status": "status"},
                 ExpressionAttributeValues=_to_storage(
                     {
@@ -926,7 +937,7 @@ class DynamoNutritionRepository:
             "TableName": self.table_name,
             "Key": {"PK": identity.pk, "SK": f"ACTION#{token}"},
             "UpdateExpression": "SET #status = :new_status, finalized_at = :finalized, updated_at = :updated",
-            "ConditionExpression": "#status = :pending AND expires_at > :now",
+            "ConditionExpression": _pending_action_live_condition(),
             "ExpressionAttributeNames": {"#status": "status"},
             "ExpressionAttributeValues": {
                 ":new_status": new_status,
@@ -969,6 +980,115 @@ class DynamoNutritionRepository:
             raise ActionFinalized("Meal action is no longer pending") from err
         finalized = self.get_action(identity, token) or action
         return FinalizeResult(new_status, finalized, self.get_meal(identity, action.meal_id), duplicate=False)
+
+    def auto_confirm_expired_action(self, identity: ServerlessIdentity, token: str) -> FinalizeResult:
+        """Confirm an expired pending action exactly once."""
+
+        action = self.get_action(identity, token)
+        if action is None:
+            raise ActionNotFound("Meal action was not found")
+        current_status = _action_status(action)
+        if current_status in {"confirmed", "cancelled"}:
+            return FinalizeResult(current_status, action, self.get_meal(identity, action.meal_id), duplicate=True)
+        now = self._now()
+        if int(getattr(action, "expires_at", 0) or 0) > epoch_seconds(now):
+            raise ActionFinalized("Meal action is still active")
+
+        final_payload = _estimate_payload(action.estimate)
+        action_update = {
+            "operation": "Update",
+            "TableName": self.table_name,
+            "Key": {"PK": identity.pk, "SK": f"ACTION#{token}"},
+            "UpdateExpression": (
+                "SET #status = :confirmed, finalized_at = :finalized, "
+                "finalization_reason = :reason, updated_at = :updated"
+            ),
+            "ConditionExpression": _pending_action_expired_condition(),
+            "ExpressionAttributeNames": {"#status": "status"},
+            "ExpressionAttributeValues": {
+                ":confirmed": "confirmed",
+                ":finalized": utc_iso(now),
+                ":reason": "expired_auto_confirm",
+                ":updated": utc_iso(now),
+                ":pending": "pending",
+                ":now": epoch_seconds(now),
+            },
+        }
+        meal_update = {
+            "operation": "Update",
+            "TableName": self.table_name,
+            "Key": {"PK": identity.pk, "SK": action.canonical_sk},
+            "UpdateExpression": (
+                "SET #status = :confirmed, adjustment_factor = :factor, "
+                "final_estimate = :final_estimate, final_macros = :final_macros, "
+                "updated_at = :updated"
+            ),
+            "ConditionExpression": "#status = :pending",
+            "ExpressionAttributeNames": {"#status": "status"},
+            "ExpressionAttributeValues": {
+                ":confirmed": "confirmed",
+                ":factor": action.adjustment_factor,
+                ":final_estimate": final_payload,
+                ":final_macros": action.estimate.total_best.to_payload(),
+                ":updated": utc_iso(now),
+                ":pending": "pending",
+            },
+        }
+        try:
+            self._transact_write([action_update, meal_update])
+        except Exception as err:
+            if not _is_conditional_failure(err):
+                raise
+            latest = self.get_action(identity, token)
+            if latest and _action_status(latest) in {"confirmed", "cancelled"}:
+                return FinalizeResult(_action_status(latest), latest, self.get_meal(identity, latest.meal_id), duplicate=True)
+            raise ActionFinalized("Meal action was finalized concurrently") from err
+        finalized = self.get_action(identity, token) or action
+        return FinalizeResult("confirmed", finalized, self.get_meal(identity, action.meal_id), duplicate=False)
+
+    def expire_pending_actions(self, *, limit: int = 100) -> list[PendingMealAction]:
+        """Auto-confirm expired pending actions and return their message data."""
+
+        now = epoch_seconds(self._now())
+        filter_expression = (
+            Attr("entity_type").eq("meal_action")
+            & Attr("status").eq("pending")
+            & (
+                Attr("action_expires_at").lte(now)
+                | (Attr("action_expires_at").not_exists() & Attr("expires_at").lte(now))
+            )
+        )
+        scan_kwargs: dict[str, Any] = {"FilterExpression": filter_expression}
+        expired: list[PendingMealAction] = []
+        while len(expired) < int(limit):
+            response = self.table.scan(**scan_kwargs)
+            for raw_item in response.get("Items", []) if isinstance(response, Mapping) else []:
+                item = dict(raw_item)
+                action = _action_from_item(item)
+                user_id = str(item.get("PK", "")).removeprefix("USER#")
+                if not user_id:
+                    continue
+                identity = ServerlessIdentity(
+                    action.telegram_user_id,
+                    user_id,
+                    action.username or "",
+                    "",
+                    "",
+                    "",
+                )
+                try:
+                    result = self.auto_confirm_expired_action(identity, action.token)
+                except (ActionNotFound, ActionFinalized):
+                    continue
+                if result.status == "confirmed" and not result.duplicate:
+                    expired.append(result.action)
+                    if len(expired) >= int(limit):
+                        break
+            last_key = response.get("LastEvaluatedKey") if isinstance(response, Mapping) else None
+            if not last_key:
+                break
+            scan_kwargs["ExclusiveStartKey"] = last_key
+        return expired
 
     def get_meal(self, identity: ServerlessIdentity, meal_id: str) -> Optional[StoredMeal]:
         pointer = self._get({"PK": identity.pk, "SK": f"MEAL_ID#{meal_id}"})
@@ -1028,6 +1148,26 @@ def _action_status(action: PendingMealAction) -> str:
     return str(action.status)
 
 
+def _pending_action_live_condition() -> str:
+    """Condition supporting new action deadlines and legacy action records."""
+
+    return (
+        "#status = :pending AND "
+        "((attribute_exists(action_expires_at) AND action_expires_at > :now) "
+        "OR (attribute_not_exists(action_expires_at) AND expires_at > :now))"
+    )
+
+
+def _pending_action_expired_condition() -> str:
+    """Condition used to atomically claim an expired action for auto-logging."""
+
+    return (
+        "#status = :pending AND "
+        "((attribute_exists(action_expires_at) AND action_expires_at <= :now) "
+        "OR (attribute_not_exists(action_expires_at) AND expires_at <= :now))"
+    )
+
+
 def _action_from_item(item: Mapping[str, Any]) -> PendingMealAction:
     plain = _from_storage(item)
     return PendingMealAction(
@@ -1046,7 +1186,7 @@ def _action_from_item(item: Mapping[str, Any]) -> PendingMealAction:
         metrics_event_id=plain.get("estimate", {}).get("metrics_event_id"),
         meal_id=str(plain.get("meal_id", "")) or None,
         canonical_sk=str(plain.get("canonical_sk", "")) or None,
-        expires_at=int(plain.get("expires_at", 0) or 0),
+        expires_at=int(plain.get("action_expires_at", plain.get("expires_at", 0)) or 0),
         original_estimate=_estimate_from_payload(plain["original_estimate"]) if plain.get("original_estimate") else None,
     )
 

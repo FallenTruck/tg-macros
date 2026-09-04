@@ -87,6 +87,11 @@ Resources:
               MaximumConcurrency: 2
             FunctionResponseTypes:
               - ReportBatchItemFailures
+        MealActionExpiry:
+          Type: Schedule
+          Properties:
+            Schedule: rate(5 minutes)
+            Description: Auto-log expired meal actions and remove their buttons
 
   WorkerExecutionRole:
     Type: AWS::IAM::Role
@@ -128,6 +133,7 @@ Resources:
                   - dynamodb:UpdateItem
                   - dynamodb:DeleteItem
                   - dynamodb:Query
+                  - dynamodb:Scan
                   - dynamodb:TransactWriteItems
                 Resource: !GetAtt FitnessDataTable.Arn
               - Effect: Allow
@@ -168,6 +174,7 @@ Resources:
                 - dynamodb:PutItem
                 - dynamodb:UpdateItem
                 - dynamodb:Query
+                - dynamodb:DeleteItem
                 - dynamodb:TransactWriteItems
               Resource: !GetAtt FitnessDataTable.Arn
             - Effect: Allow

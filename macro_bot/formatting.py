@@ -141,3 +141,11 @@ def format_profile_setup_message(setup_url: str) -> str:
         "Open it in Telegram using the button below, or this link:\n"
         f"{setup_url}"
     )
+
+
+def format_workout_setup_message(setup_url: str) -> str:
+    return (
+        "Open the Workout Mini App in Telegram.\n"
+        "Your workout details stay private to your account:\n"
+        f"{setup_url}"
+    )

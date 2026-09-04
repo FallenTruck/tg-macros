@@ -7,7 +7,7 @@ import logging
 import os
 from datetime import date, datetime, timezone
 from pathlib import Path
-from typing import Any, Dict, Optional
+from typing import Any, Dict, Mapping, Optional
 from zoneinfo import ZoneInfo
 
 from .models import MacroTotal, QuestionnaireAnswers, UserProfile
@@ -29,6 +29,7 @@ from .serverless_data import (
     utc_iso,
 )
 from .workout_programme import PROGRAMME_ID
+from .workout_execution import WorkoutExecutionRepository
 
 logger = logging.getLogger(__name__)
 
@@ -104,6 +105,7 @@ class NutritionService:
             self.catalog_store,
             recommendation_client=None,
         )
+        self.workout_execution = WorkoutExecutionRepository(repository)
 
     def _now(self) -> datetime:
         value = self._now_fn()
@@ -122,6 +124,8 @@ class NutritionService:
         chat_id: int,
         chat_type: str,
         message_id: int,
+        launch_type: str = "nutrition",
+        requested_day: Optional[str] = None,
     ) -> dict[str, Any]:
         return self.repository.create_mini_app_launch(
             token,
@@ -129,6 +133,8 @@ class NutritionService:
             chat_id=chat_id,
             chat_type=chat_type,
             message_id=message_id,
+            launch_type=launch_type,
+            requested_day=requested_day,
         )
 
     def profile_response(self, identity: ServerlessIdentity) -> dict[str, Any]:
@@ -229,6 +235,39 @@ class NutritionService:
             raise KeyError(f"Workout programme day is unavailable: {day_code}")
         return day
 
+    # ---- Durable user-owned workout execution ------------------------------
+
+    def start_workout(self, identity: ServerlessIdentity, day_code: str) -> dict[str, Any]:
+        return self.workout_execution.start_session(
+            identity,
+            day_code,
+            actual_local_date=self._local_date(identity),
+        )
+
+    def active_workout(self, identity: ServerlessIdentity) -> Optional[dict[str, Any]]:
+        return self.workout_execution.get_active_session(identity)
+
+    def workout_session(self, identity: ServerlessIdentity, session_id: str) -> dict[str, Any]:
+        return self.workout_execution.get_session(identity, session_id)
+
+    def choose_workout_exercise(self, identity: ServerlessIdentity, session_id: str, execution_id: str, payload: Mapping[str, Any]) -> dict[str, Any]:
+        return self.workout_execution.select_exercise(identity, session_id, execution_id, payload)
+
+    def skip_workout_exercise(self, identity: ServerlessIdentity, session_id: str, execution_id: str, payload: Mapping[str, Any]) -> dict[str, Any]:
+        return self.workout_execution.skip_execution(identity, session_id, execution_id, payload)
+
+    def reset_workout_exercise(self, identity: ServerlessIdentity, session_id: str, execution_id: str, payload: Mapping[str, Any]) -> dict[str, Any]:
+        return self.workout_execution.reset_execution(identity, session_id, execution_id, payload)
+
+    def put_workout_set(self, identity: ServerlessIdentity, session_id: str, execution_id: str, ordinal: int, payload: Mapping[str, Any]) -> dict[str, Any]:
+        return self.workout_execution.put_set(identity, session_id, execution_id, ordinal, payload)
+
+    def skip_workout_set(self, identity: ServerlessIdentity, session_id: str, execution_id: str, ordinal: int, payload: Mapping[str, Any]) -> dict[str, Any]:
+        return self.workout_execution.skip_set(identity, session_id, execution_id, ordinal, payload)
+
+    def cancel_workout(self, identity: ServerlessIdentity, session_id: str, payload: Mapping[str, Any]) -> dict[str, Any]:
+        return self.workout_execution.cancel_session(identity, session_id, payload)
+
     def meals_for_date_range(self, identity: ServerlessIdentity, start: date, end: date) -> list[StoredMeal]:
         profile = self.repository.get_profile(identity.user_id)
         timezone_name = profile.timezone if profile else DEFAULT_TIMEZONE
@@ -302,6 +341,12 @@ class NutritionService:
 
     def finalize_action(self, identity: ServerlessIdentity, token: str, operation: str):
         return self.repository.finalize_action(identity, token, operation)
+
+    def auto_confirm_expired_action(self, identity: ServerlessIdentity, token: str):
+        return self.repository.auto_confirm_expired_action(identity, token)
+
+    def expire_pending_actions(self, *, limit: int = 100):
+        return self.repository.expire_pending_actions(limit=limit)
 
     def recommendation(self, identity: ServerlessIdentity):
         target_date = self._local_date(identity)

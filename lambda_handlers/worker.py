@@ -23,6 +23,7 @@ from macro_bot.formatting import (
     format_pending_message,
     format_profile_setup_message,
     format_recommendation_message,
+    format_workout_setup_message,
     parse_meal_datetime,
 )
 from macro_bot.serverless_auth import SSMParameterCache, bot_token_from_environment
@@ -71,6 +72,39 @@ def _log_stage(
         _fingerprint(user_id),
         stage,
         max(0, int(duration_ms)),
+        int(attempt),
+        result,
+        error_category or "none",
+    )
+
+
+def _log_workout_event(
+    event: str,
+    update_id: int,
+    user_id: Any,
+    *,
+    chat_type: str = "",
+    command: str = "",
+    operation: str = "",
+    stage: str = "",
+    duration_ms: Optional[int] = None,
+    attempt: int = 1,
+    result: str = "success",
+    error_category: Optional[str] = None,
+) -> None:
+    """Emit workout telemetry without identifiers, payloads, or secrets."""
+
+    logger.info(
+        "%s update_id=%s user_fingerprint=%s chat_type=%s command=%s operation=%s "
+        "stage=%s duration_ms=%s attempt=%s result=%s error_category=%s",
+        event,
+        update_id,
+        _fingerprint(user_id),
+        chat_type or "none",
+        command or "none",
+        operation or "none",
+        stage or "none",
+        "none" if duration_ms is None else max(0, int(duration_ms)),
         int(attempt),
         result,
         error_category or "none",
@@ -356,6 +390,31 @@ async def _send(bot: Any, chat_id: int, text: str, reply_markup: Any = None) -> 
     return await bot.send_message(chat_id=chat_id, text=text, reply_markup=reply_markup)
 
 
+async def _expire_meal_actions() -> int:
+    """Finalize timed-out meal prompts and remove their Telegram controls."""
+
+    service = _service()
+    actions = service.expire_pending_actions()
+    if not actions:
+        return 0
+    bot = _bot()
+    for action in actions:
+        if action.message_id is None or not action.chat_id:
+            continue
+        try:
+            await bot.edit_message_text(
+                chat_id=action.chat_id,
+                message_id=action.message_id,
+                text=f"{format_pending_message(action)}\n\n✅ Logged automatically after timeout",
+                reply_markup=None,
+            )
+        except Exception as err:
+            # The meal is already durably confirmed; an old/deleted Telegram
+            # message must not make the scheduled sweep retry the meal.
+            logger.warning("meal_action_expiry_message_update_failed error_type=%s", type(err).__name__)
+    return len(actions)
+
+
 async def _bot_username(bot: Any) -> str:
     configured = os.getenv("BOT_USERNAME", "").strip().lstrip("@")
     if configured:
@@ -395,6 +454,110 @@ async def _handle_openapp(
         chat_id,
         format_profile_setup_message(direct_link),
         build_direct_setup_keyboard(direct_link),
+    )
+
+
+async def _handle_workout(
+    service: NutritionService,
+    identity: Any,
+    bot: Any,
+    message: Mapping[str, Any],
+    update_id: int,
+    requested_day: str = "",
+) -> None:
+    chat_id = _chat_id(message)
+    if chat_id is None:
+        raise NonRetryableUpdate("workout message has no chat")
+    chat_type = _chat_type(message)
+    _log_workout_event(
+        "workout_command_start",
+        update_id,
+        identity.user_id,
+        chat_type=chat_type,
+        command="/workout",
+        stage="command",
+    )
+    bot_username = await _bot_username(bot)
+    launch_token = secrets.token_urlsafe(18)
+    stage_started = time.monotonic()
+    try:
+        service.create_mini_app_launch(
+            launch_token,
+            identity=identity,
+            chat_id=chat_id,
+            chat_type=chat_type,
+            message_id=_message_id(message),
+            launch_type="workout",
+            requested_day=requested_day or None,
+        )
+    except Exception as err:
+        _log_workout_event(
+            "workout_launch_context_created",
+            update_id,
+            identity.user_id,
+            chat_type=chat_type,
+            command="/workout",
+            stage="launch_context",
+            duration_ms=round((time.monotonic() - stage_started) * 1000),
+            result="failure",
+            error_category=type(err).__name__,
+        )
+        raise
+    _log_workout_event(
+        "workout_launch_context_created",
+        update_id,
+        identity.user_id,
+        chat_type=chat_type,
+        command="/workout",
+        stage="launch_context",
+        duration_ms=round((time.monotonic() - stage_started) * 1000),
+    )
+    direct_link = build_mini_app_direct_link(bot_username, launch_token)
+    _log_workout_event(
+        "workout_direct_link_built",
+        update_id,
+        identity.user_id,
+        chat_type=chat_type,
+        command="/workout",
+        stage="direct_link",
+    )
+    _log_workout_event(
+        "workout_telegram_reply_start",
+        update_id,
+        identity.user_id,
+        chat_type=chat_type,
+        command="/workout",
+        stage="telegram_reply",
+    )
+    stage_started = time.monotonic()
+    try:
+        await _send(
+            bot,
+            chat_id,
+            format_workout_setup_message(direct_link),
+            build_direct_setup_keyboard(direct_link),
+        )
+    except Exception as err:
+        _log_workout_event(
+            "workout_telegram_reply_complete",
+            update_id,
+            identity.user_id,
+            chat_type=chat_type,
+            command="/workout",
+            stage="telegram_reply",
+            duration_ms=round((time.monotonic() - stage_started) * 1000),
+            result="failure",
+            error_category=type(err).__name__,
+        )
+        raise
+    _log_workout_event(
+        "workout_telegram_reply_complete",
+        update_id,
+        identity.user_id,
+        chat_type=chat_type,
+        command="/workout",
+        stage="telegram_reply",
+        duration_ms=round((time.monotonic() - stage_started) * 1000),
     )
 
 
@@ -583,13 +746,28 @@ async def _handle_photo(
         service.set_action_message_id(identity, action.token, int(sent_message_id))
 
 
-async def _handle_callback(service: NutritionService, identity: Any, bot: Any, update: Mapping[str, Any]) -> None:
+async def _handle_callback(
+    service: NutritionService,
+    identity: Any,
+    bot: Any,
+    update: Mapping[str, Any],
+    update_id: int,
+) -> None:
     callback = update.get("callback_query")
     if not isinstance(callback, Mapping):
         raise NonRetryableUpdate("callback update is malformed")
     callback_id = str(callback.get("id", "") or "")
     data = str(callback.get("data", "") or "")
     parts = data.split(":")
+    operation = parts[2] if len(parts) >= 3 and parts[:2] == ["meal", "v1"] else "unknown"
+    _log_workout_event(
+        "telegram_callback_dispatch",
+        update_id,
+        identity.user_id,
+        chat_type=_chat_type(callback.get("message", {})) if isinstance(callback.get("message"), Mapping) else "",
+        operation=operation,
+        stage="callback",
+    )
     if len(parts) != 4 or parts[:2] != ["meal", "v1"]:
         if callback_id:
             await bot.answer_callback_query(callback_query_id=callback_id)
@@ -599,6 +777,7 @@ async def _handle_callback(service: NutritionService, identity: Any, bot: Any, u
         if callback_id:
             await bot.answer_callback_query(callback_query_id=callback_id)
         return
+    auto_confirmed = False
     action = service.get_action(identity, token)
     if action is None:
         if callback_id:
@@ -606,35 +785,53 @@ async def _handle_callback(service: NutritionService, identity: Any, bot: Any, u
         return
     try:
         if action_name in {"smaller", "larger"}:
-            action = service.scale_action(identity, token, 0.8 if action_name == "smaller" else 1.2)
+            try:
+                action = service.scale_action(identity, token, 0.8 if action_name == "smaller" else 1.2)
+            except ActionExpired:
+                result = service.auto_confirm_expired_action(identity, token)
+                auto_confirmed = True
+            else:
+                if callback_id:
+                    await bot.answer_callback_query(callback_query_id=callback_id)
+                message = callback.get("message")
+                if isinstance(message, Mapping):
+                    chat_id = _chat_id(message)
+                    message_id = _message_id(message)
+                    if chat_id is not None and message_id:
+                        await bot.edit_message_text(
+                            chat_id=chat_id,
+                            message_id=message_id,
+                            text=format_pending_message(action),
+                            reply_markup=build_meal_keyboard(token),
+                        )
+                return
+        else:
+            result = service.finalize_action(identity, token, "confirm" if action_name == "confirm" else "cancel")
+    except ActionExpired:
+        try:
+            result = service.auto_confirm_expired_action(identity, token)
+            auto_confirmed = True
+        except (ActionNotFound, ActionExpired, ActionFinalized) as err:
             if callback_id:
-                await bot.answer_callback_query(callback_query_id=callback_id)
-            message = callback.get("message")
-            if isinstance(message, Mapping):
-                chat_id = _chat_id(message)
-                message_id = _message_id(message)
-                if chat_id is not None and message_id:
-                    await bot.edit_message_text(
-                        chat_id=chat_id,
-                        message_id=message_id,
-                        text=format_pending_message(action),
-                        reply_markup=build_meal_keyboard(token),
-                    )
+                await bot.answer_callback_query(callback_query_id=callback_id, text=str(err)[:180])
             return
-        result = service.finalize_action(identity, token, "confirm" if action_name == "confirm" else "cancel")
-    except (ActionNotFound, ActionExpired, ActionFinalized) as err:
+    except (ActionNotFound, ActionFinalized) as err:
         if callback_id:
             await bot.answer_callback_query(callback_query_id=callback_id, text=str(err)[:180])
         return
     if callback_id:
-        await bot.answer_callback_query(callback_query_id=callback_id)
+        await bot.answer_callback_query(
+            callback_query_id=callback_id,
+            text="Meal logged automatically after timeout." if result.status == "confirmed" else None,
+        )
     message = callback.get("message")
     if isinstance(message, Mapping):
         chat_id = _chat_id(message)
         message_id = _message_id(message)
         if chat_id is not None and message_id:
             if result.status == "confirmed":
-                text = f"{format_pending_message(result.action)}\n\n✅ Logged"
+                suffix = "✅ Logged automatically after timeout" if auto_confirmed else "✅ Logged"
+                text = f"{format_pending_message(result.action)}\n\n{suffix}"
             else:
                 text = f"{format_pending_message(result.action)}\n\n❌ Cancelled — please re-upload the photo (add caption if possible)."
             await bot.edit_message_text(chat_id=chat_id, message_id=message_id, text=text, reply_markup=None)
@@ -688,7 +885,7 @@ async def process_update_message(
         attempt=attempt,
     )
     if isinstance(update.get("callback_query"), Mapping):
-        await _handle_callback(service, identity, bot, update)
+        await _handle_callback(service, identity, bot, update, update_id)
         return
     if not isinstance(message_payload, Mapping):
         return
@@ -697,12 +894,27 @@ async def process_update_message(
         return
     text = str(message_payload.get("text", "") or "").strip()
     command = text.split(maxsplit=1)[0].split("@", 1)[0].lower() if text.startswith("/") else ""
+    if command in {"/logmeal", "/openapp", "/workout", "/suggestmeal"}:
+        _log_workout_event(
+            "telegram_command_dispatch",
+            update_id,
+            identity.user_id,
+            chat_type=_chat_type(message_payload),
+            command=command,
+            stage="dispatch",
+        )
     if command == "/logmeal":
         service.begin_logmeal(identity)
         await _send(bot, chat_id, "Send meal date/time in this format: DD-MM-YYYY HH:MM")
         return
     if command == "/openapp":
         await _handle_openapp(service, identity, bot, message_payload, update_id)
+        return
+    if command == "/workout":
+        requested_day = text.split(maxsplit=1)[1].strip().upper() if len(text.split(maxsplit=1)) > 1 else ""
+        if requested_day not in {"PULL", "SUPPORT_CORE", "PUSH"}:
+            requested_day = ""
+        await _handle_workout(service, identity, bot, message_payload, update_id, requested_day)
         return
     if command == "/suggestmeal":
         await _handle_recommendation(service, identity, bot, chat_id)
@@ -724,6 +936,11 @@ async def process_update_message(
 
 
 def handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
+    if event.get("source") == "aws.events":
+        expired_count = asyncio.run(_expire_meal_actions())
+        logger.info("meal_action_expiry_sweep completed_count=%s", expired_count)
+        return {"expired_actions": expired_count}
+
     client = _dynamodb()
     table_name = os.environ["IDEMPOTENCY_TABLE"]
     failures = []
