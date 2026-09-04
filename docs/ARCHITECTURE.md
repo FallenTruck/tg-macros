@@ -8,24 +8,48 @@ resource identifiers and outputs.
 ## System overview
 
 ```text
-Telegram webhook
-        |
-        v
-API Gateway HTTP API ---> Webhook Lambda ---> FIFO SQS queue ---> Worker Lambda
-        |                                      |                   |
-        |                                      +--> DLQ             +--> Telegram/OpenAI/SSM
-        v                                                          |
-CloudFront /api/* -----------------------------------------------+
-        |
-        +--> API Lambda ------------------------------------------+
-        |                                                         |
-        +--> private S3 Mini App                                 v
-                                                        DynamoDB tables
+Telegram
+   |
+   v
+API Gateway HTTP API
+   |
+   v
+Webhook Lambda
+   |
+   v
+SQS FIFO
+   |
+   v
+Worker Lambda
+   |
+   +--> Telegram Bot API
+   +--> OpenAI
+   +--> DynamoDB
+
+
+Telegram Mini App
+       |
+       v
+   CloudFront
+     /     \
+    /       \
+  /*       /api/*
+   |          |
+   v          v
+Private S3  API Gateway
+                |
+                v
+             API Lambda
+                |
+                v
+             DynamoDB
 ```
 
-The Mini App is served by CloudFront. Its `/api/*` path is routed to the HTTP
-API, and all other paths are served from the private S3 origin. CloudFront uses
-an Origin Access Control (OAC), so the S3 bucket is not public.
+Telegram webhook traffic goes directly to API Gateway and then to the webhook
+processing path. Mini App browser traffic goes to CloudFront: `/api/*` is routed
+to API Gateway and static paths are routed to the private S3 origin. API Gateway
+is not upstream of CloudFront. CloudFront uses an Origin Access Control (OAC),
+so the S3 bucket is not public.
 
 ## Infrastructure source of truth
 
@@ -146,6 +170,12 @@ assets. CloudWatch Lambda log groups retain logs for 14 days.
 - SSM Parameter Store holds the Bot API token, OpenAI key, and webhook secret.
   Code receives parameter names through environment variables and fetches values
   with decryption at runtime.
+- Current SSM parameter names are:
+  - `/tg-macros/prod/BOT_TOKEN`
+  - `/tg-macros/prod/OPENAI_API_KEY`
+  - `/tg-macros/prod/TELEGRAM_WEBHOOK_SECRET`
+  These are parameter names only. Secret values must never be committed or
+  printed.
 - No secret values belong in Git, deployment output, or operational reports.
 - The Mini App bucket blocks public access and accepts reads only from the
   CloudFront distribution through its OAC policy.

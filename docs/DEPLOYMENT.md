@@ -15,6 +15,16 @@ it does not deploy Lambda code or static Mini App assets.
 
 `sam deploy` does not upload the Mini App contents to the application bucket.
 `make deploy-miniapp` does not deploy Lambda or CloudFormation changes.
+Pushing to Git also does not deploy either release path.
+
+| Change type | Tests | `make sync-runtime` | SAM build/deploy | Mini App deploy |
+| --- | --- | --- | --- | --- |
+| CSS / HTML only | Yes | No | No | Yes |
+| Mini App JS only | Yes | No, unless the runtime copy changed | No | Yes |
+| Backend Python | Yes | Yes | Yes | Only if frontend changed |
+| API backend | Yes | Yes | Yes | Only if frontend changed |
+| `template.yaml` / SAM infrastructure | Yes | As applicable | Yes | Normally no |
+| Frontend + backend | Yes | Yes | Yes | Yes |
 
 ## Variables and prerequisites
 
