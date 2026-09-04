@@ -88,6 +88,7 @@ workoutProgrammeEl?.addEventListener("change", handleWorkoutChange);
 workoutSessionEl?.addEventListener("click", handleWorkoutClick);
 workoutSessionEl?.addEventListener("change", handleWorkoutChange);
 workoutSessionEl?.addEventListener("submit", handleWorkoutSubmit);
+workoutCompletionDockEl?.addEventListener("click", handleWorkoutClick);
 
 form.addEventListener("input", () => {
   state.preview = null;

@@ -39,6 +39,7 @@ class MiniAppFrontendTests(unittest.TestCase):
         self.assertIn('Save Set ${ordinal}', source)
         self.assertIn('Skip Set', source)
         self.assertIn('data-action="submit-workout"', source)
+        self.assertIn('workoutCompletionDockEl?.addEventListener("click", handleWorkoutClick)', source)
         self.assertIn('Submit Workout', source)
         self.assertIn('/complete', source)
         self.assertIn('.workout-set-actions > .workout-skip-controls', styles)
