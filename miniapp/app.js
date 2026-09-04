@@ -421,6 +421,10 @@ function renderWorkoutSession() {
       <div class="workout-execution-list">
         ${(active.executions || []).map((execution) => renderWorkoutExecution(execution, exercises)).join("")}
       </div>
+      <div class="workout-session-submit">
+        <p class="workout-day-note">When every exercise is logged or skipped, submit this workout to save it to your history.</p>
+        <button class="primary" type="button" data-action="submit-workout">Submit Workout</button>
+      </div>
     </section>
   `;
 }
@@ -563,6 +567,14 @@ async function handleWorkoutClick(event) {
       state.activeWorkout = null;
       setWorkoutMode(WORKOUT_PROGRAMME_MODE);
       setStatus("Workout cancelled. Your saved history remains intact.", "info");
+      return response;
+    }
+    if (action === "submit-workout") {
+      button.disabled = true;
+      const response = await apiFetch(`/api/workout/sessions/${encodeURIComponent(state.activeWorkout.session.session_id)}/complete`, {method: "POST", body: JSON.stringify({expected_revision: state.activeWorkout.session.revision})});
+      state.activeWorkout = null;
+      setWorkoutMode(WORKOUT_PROGRAMME_MODE);
+      setStatus("Workout submitted. Your saved history has been updated.", "success");
       return response;
     }
   } catch (error) {

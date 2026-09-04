@@ -715,6 +715,22 @@ button:disabled {
   margin-top: 18px;
 }
 
+.workout-session-submit {
+  display: grid;
+  gap: 10px;
+  margin-top: 18px;
+  padding-top: 18px;
+  border-top: 1px solid var(--line);
+}
+
+.workout-session-submit .workout-day-note {
+  margin: 0;
+}
+
+.workout-session-submit button {
+  width: 100%;
+}
+
 .workout-execution-card {
   padding: 16px;
   border: 1px solid var(--line);

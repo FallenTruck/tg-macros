@@ -272,6 +272,64 @@ class WorkoutExecutionTests(unittest.TestCase):
         self.assertNotIn((user.pk, "WORKOUT#ACTIVE"), self.table.items)
         self.assertIsNone(self.service.active_workout(user))
 
+    def test_submit_requires_each_exercise_to_be_logged_or_skipped(self):
+        payload = self.start()
+        with self.assertRaisesRegex(WorkoutConflict, "Log or skip every exercise"):
+            self.service.complete_workout(self.identity(), self.session_id(payload), {"expected_revision": 1})
+        self.assertIsNotNone(self.service.active_workout(self.identity()))
+
+    def test_submit_completes_session_and_preserves_history(self):
+        payload = self.start()
+        session_id = self.session_id(payload)
+        first = payload["executions"][0]
+        self.service.put_workout_set(
+            self.identity(), session_id, first["execution_id"], 1,
+            {"load_value": 37.5, "reps": 9, "execution_expected_revision": 1},
+        )
+        for execution in payload["executions"][1:]:
+            self.service.skip_workout_exercise(
+                self.identity(), session_id, execution["execution_id"],
+                {"skip_reason": "intentionally_skipped", "expected_revision": 1},
+            )
+        for ordinal in (2, 3):
+            self.service.put_workout_set(
+                self.identity(), session_id, first["execution_id"], ordinal,
+                {"load_value": 37.5, "reps": 9, "execution_expected_revision": ordinal},
+            )
+
+        completed = self.service.complete_workout(self.identity(), session_id, {"expected_revision": 1})
+
+        self.assertEqual(completed["session"]["status"], "completed")
+        self.assertIsNotNone(completed["session"]["completed_at"])
+        self.assertEqual(completed["executions"][0]["status"], "completed")
+        self.assertNotIn((self.identity().pk, "WORKOUT#ACTIVE"), self.table.items)
+        self.assertEqual(self.service.workout_session(self.identity(), session_id)["session"]["status"], "completed")
+
+    def test_completed_session_rejects_late_set_writes(self):
+        payload = self.start()
+        session_id = self.session_id(payload)
+        first = payload["executions"][0]
+        self.service.put_workout_set(
+            self.identity(), session_id, first["execution_id"], 1,
+            {"load_value": 37.5, "reps": 9, "execution_expected_revision": 1},
+        )
+        for execution in payload["executions"][1:]:
+            self.service.skip_workout_exercise(
+                self.identity(), session_id, execution["execution_id"],
+                {"skip_reason": "intentionally_skipped", "expected_revision": 1},
+            )
+        for ordinal in (2, 3):
+            self.service.put_workout_set(
+                self.identity(), session_id, first["execution_id"], ordinal,
+                {"load_value": 37.5, "reps": 9, "execution_expected_revision": ordinal},
+            )
+        self.service.complete_workout(self.identity(), session_id, {"expected_revision": 1})
+        with self.assertRaises(WorkoutConflict):
+            self.service.put_workout_set(
+                self.identity(), session_id, first["execution_id"], 4,
+                {"load_value": 37.5, "reps": 9, "execution_expected_revision": 4},
+            )
+
     def test_authenticated_api_starts_and_reads_only_authenticated_user_session(self):
         service = self.service
         client = TestClient(api.app)
@@ -287,6 +345,36 @@ class WorkoutExecutionTests(unittest.TestCase):
             self.assertEqual(active.json()["session"]["session"]["session_id"], session_id)
             denied = client.post("/api/workout/sessions", json={"day_code": "PULL"})
             self.assertEqual(denied.status_code, 401)
+
+    def test_authenticated_api_submits_completed_workout_and_clears_active_session(self):
+        service = self.service
+        client = TestClient(api.app)
+        valid = _init_data()
+        headers = {"X-Telegram-Init-Data": valid}
+        with patch.object(api, "_service", return_value=service), patch.object(
+            api, "bot_token_from_environment", return_value="test-token"
+        ):
+            started = client.post("/api/workout/sessions", json={"day_code": "PULL"}, headers=headers)
+            self.assertEqual(started.status_code, 200)
+            session = started.json()["session"]
+            session_id = session["session"]["session_id"]
+            for execution in session["executions"]:
+                skipped = client.post(
+                    f"/api/workout/sessions/{session_id}/executions/{execution['execution_id']}/skip",
+                    json={"skip_reason": "intentionally_skipped", "expected_revision": 1},
+                    headers=headers,
+                )
+                self.assertEqual(skipped.status_code, 200)
+            completed = client.post(
+                f"/api/workout/sessions/{session_id}/complete",
+                json={"expected_revision": 1},
+                headers=headers,
+            )
+            self.assertEqual(completed.status_code, 200)
+            self.assertEqual(completed.json()["session"]["status"], "completed")
+            active = client.get("/api/workout/sessions/active", headers=headers)
+            self.assertEqual(active.status_code, 200)
+            self.assertIsNone(active.json()["session"])
 
     def test_workout_api_telemetry_is_safe_and_distinguishes_lifecycle_events(self):
         service = self.service

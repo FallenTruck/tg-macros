@@ -425,6 +425,28 @@ async def cancel_workout_session(
     return _no_store(session)
 
 
+@app.post("/api/workout/sessions/{session_id}/complete")
+async def complete_workout_session(
+    session_id: str,
+    payload: Dict[str, Any] = Body(...),
+    x_telegram_init_data: str = Header(default="", alias="X-Telegram-Init-Data"),
+) -> JSONResponse:
+    service = _service()
+    identity = _auth_identity(x_telegram_init_data, service)
+    started = time.monotonic()
+    try:
+        session = service.complete_workout(identity, session_id, payload)
+    except (InvalidWorkoutInput, WorkoutNotFound, WorkoutConflict) as err:
+        raise _workout_error(err) from err
+    _log_workout_api_event(
+        "workout_session_completed",
+        identity,
+        stage="session_complete",
+        duration_ms=round((time.monotonic() - started) * 1000),
+    )
+    return _no_store(session)
+
+
 @app.post("/api/targets/preview")
 async def preview_targets(
     payload: Dict[str, Any] = Body(...),

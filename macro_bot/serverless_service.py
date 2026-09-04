@@ -268,6 +268,9 @@ class NutritionService:
     def cancel_workout(self, identity: ServerlessIdentity, session_id: str, payload: Mapping[str, Any]) -> dict[str, Any]:
         return self.workout_execution.cancel_session(identity, session_id, payload)
 
+    def complete_workout(self, identity: ServerlessIdentity, session_id: str, payload: Mapping[str, Any]) -> dict[str, Any]:
+        return self.workout_execution.complete_session(identity, session_id, payload)
+
     def meals_for_date_range(self, identity: ServerlessIdentity, start: date, end: date) -> list[StoredMeal]:
         profile = self.repository.get_profile(identity.user_id)
         timezone_name = profile.timezone if profile else DEFAULT_TIMEZONE

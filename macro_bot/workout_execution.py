@@ -497,14 +497,15 @@ class WorkoutExecutionRepository:
             "TableName": self.repository.table_name,
             "Key": {"PK": session["PK"], "SK": execution["SK"]},
             "UpdateExpression": "SET #status = :status, revision = :execution_new_revision, updated_at = :now",
-            "ConditionExpression": "revision = :execution_expected AND #status <> :skipped",
+            "ConditionExpression": "revision = :execution_expected AND (#status = :pending OR #status = :in_progress)",
             "ExpressionAttributeNames": {"#status": "status"},
             "ExpressionAttributeValues": {
                 ":status": EXECUTION_STATUS_IN_PROGRESS,
                 ":execution_new_revision": execution_expected + 1,
                 ":now": now,
                 ":execution_expected": execution_expected,
-                ":skipped": EXECUTION_STATUS_SKIPPED,
+                ":pending": EXECUTION_STATUS_PENDING,
+                ":in_progress": EXECUTION_STATUS_IN_PROGRESS,
             },
         }
         try:
@@ -519,6 +520,86 @@ class WorkoutExecutionRepository:
         payload_with_status = dict(payload)
         payload_with_status["status"] = SET_STATUS_SKIPPED
         return self.put_set(identity, session_id, execution_id, ordinal, payload_with_status)
+
+    def complete_session(self, identity: ServerlessIdentity, session_id: str, payload: Mapping[str, Any]) -> dict[str, Any]:
+        session = self._require_in_progress(identity, session_id)
+        expected = self._expected_revision(payload, int(session.get("revision", 0)))
+        executions = self.repository._query(
+            Key("PK").eq(self._user_pk(identity)) & Key("SK").begins_with(f"{session['SK']}#EXEC#"),
+            ScanIndexForward=True,
+        )
+        blockers = []
+        for execution in sorted(
+            (item for item in executions if item.get("entity_type") == "workout_execution"),
+            key=lambda item: int(item.get("prescription_sequence", 0)),
+        ):
+            if execution.get("status") == EXECUTION_STATUS_SKIPPED:
+                continue
+            sets = self._set_items(identity, execution)
+            minimum_sets = max(1, int(execution.get("prescribed_set_count_min") or 1))
+            if len(sets) < minimum_sets:
+                blockers.append(str(execution.get("prescription_sequence", "exercise")))
+        if blockers:
+            exercises = ", ".join(blockers)
+            raise WorkoutConflict(f"Log or skip every exercise before submitting (incomplete: {exercises})")
+
+        now = self._now()
+        operations = [
+            {
+                "operation": "Update",
+                "TableName": self.repository.table_name,
+                "Key": {"PK": session["PK"], "SK": session["SK"]},
+                "UpdateExpression": "SET #status = :completed, completed_at = :completed_at, revision = :new_revision, updated_at = :now",
+                "ConditionExpression": "#status = :in_progress AND revision = :expected",
+                "ExpressionAttributeNames": {"#status": "status"},
+                "ExpressionAttributeValues": {
+                    ":completed": SESSION_STATUS_COMPLETED,
+                    ":completed_at": now,
+                    ":new_revision": expected + 1,
+                    ":now": now,
+                    ":in_progress": SESSION_STATUS_IN_PROGRESS,
+                    ":expected": expected,
+                },
+            },
+        ]
+        for execution in executions:
+            if execution.get("entity_type") != "workout_execution" or execution.get("status") == EXECUTION_STATUS_SKIPPED:
+                continue
+            execution_revision = int(execution.get("revision", 0))
+            operations.append(
+                {
+                    "operation": "Update",
+                    "TableName": self.repository.table_name,
+                    "Key": {"PK": session["PK"], "SK": execution["SK"]},
+                    "UpdateExpression": "SET #status = :completed, revision = :new_revision, updated_at = :now",
+                    "ConditionExpression": "#status = :in_progress AND revision = :expected",
+                    "ExpressionAttributeNames": {"#status": "status"},
+                    "ExpressionAttributeValues": {
+                        ":completed": EXECUTION_STATUS_COMPLETED,
+                        ":new_revision": execution_revision + 1,
+                        ":now": now,
+                        ":in_progress": EXECUTION_STATUS_IN_PROGRESS,
+                        ":expected": execution_revision,
+                    },
+                }
+            )
+        operations.append(
+            {
+                "operation": "Delete",
+                "TableName": self.repository.table_name,
+                "Key": {"PK": identity.pk, "SK": SESSION_ACTIVE_SK},
+                "ConditionExpression": "session_id = :session_id",
+                "ExpressionAttributeValues": {":session_id": session["session_id"]},
+            }
+        )
+        try:
+            self.repository._transact_write(operations)
+        except Exception as err:
+            if _is_conditional_failure(err):
+                raise WorkoutConflict("Workout session changed; reload and retry") from err
+            raise
+        updated = self.repository._get({"PK": session["PK"], "SK": session["SK"]})
+        return self._payload(identity, updated or session)
 
     def cancel_session(self, identity: ServerlessIdentity, session_id: str, payload: Mapping[str, Any]) -> dict[str, Any]:
         session = self._require_in_progress(identity, session_id)

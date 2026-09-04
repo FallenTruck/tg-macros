@@ -52,15 +52,17 @@ def _condition_matches(expression, item, names=None, values=None):
         return False
     if "#status = :current" in expression and item.get(names.get("#status", "status")) != values.get(":current"):
         return False
-    if "#status = :in_progress" in expression and item.get(names.get("#status", "status")) != values.get(":in_progress"):
-        return False
     if ("status = :pending OR status = :in_progress" in expression or "#status = :pending OR #status = :in_progress" in expression) and item.get("status") not in {
         values.get(":pending"), values.get(":in_progress")
     }:
         return False
+    if "#status = :in_progress" in expression and "OR #status = :in_progress" not in expression and item.get(names.get("#status", "status")) != values.get(":in_progress"):
+        return False
+    if "status = :in_progress" in expression and "OR status = :in_progress" not in expression and item.get("status") != values.get(":in_progress"):
+        return False
     if "status = :processing" in expression:
         return item.get("status") == values.get(":processing")
-    if "status = :pending" in expression:
+    if "status = :pending" in expression and "OR status = :in_progress" not in expression:
         if item.get("status") != values.get(":pending"):
             return False
         if "action_expires_at" in expression:
