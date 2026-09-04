@@ -25,6 +25,13 @@ html {
   overflow-x: hidden;
 }
 
+[hidden],
+.workout-session[hidden],
+.workout-programme[hidden],
+.workout-completion-dock[hidden] {
+  display: none !important;
+}
+
 * {
   box-sizing: border-box;
 }
@@ -75,6 +82,10 @@ label,
   width: min(920px, calc(100vw - 24px));
   margin: 0 auto;
   padding: 18px 0 calc(124px + env(safe-area-inset-bottom));
+}
+
+.page-shell.workout-active {
+  padding-bottom: calc(210px + env(safe-area-inset-bottom));
 }
 
 .app-bar {
@@ -715,20 +726,42 @@ button:disabled {
   margin-top: 18px;
 }
 
-.workout-session-submit {
+.workout-completion-dock {
+  position: fixed;
+  left: 50%;
+  bottom: calc(102px + env(safe-area-inset-bottom));
+  z-index: 19;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  width: min(920px, calc(100vw - 24px));
+  padding: 10px 12px;
+  border: 1px solid var(--line-strong);
+  border-radius: 18px;
+  background: rgba(255, 250, 244, 0.96);
+  box-shadow: 0 18px 32px rgba(88, 62, 35, 0.16);
+  transform: translateX(-50%);
+  backdrop-filter: blur(18px);
+}
+
+.workout-completion-copy {
+  min-width: 0;
   display: grid;
-  gap: 10px;
-  margin-top: 18px;
-  padding-top: 18px;
-  border-top: 1px solid var(--line);
+  gap: 3px;
+  flex: 1 1 auto;
 }
 
-.workout-session-submit .workout-day-note {
-  margin: 0;
+.workout-completion-copy strong {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
-.workout-session-submit button {
-  width: 100%;
+.workout-completion-dock button {
+  flex: 0 1 auto;
+  min-height: 44px;
+  padding: 10px 16px;
+  white-space: nowrap;
 }
 
 .workout-execution-card {
@@ -759,6 +792,16 @@ button:disabled {
   gap: 8px;
   min-width: 0;
   width: 100%;
+  max-width: 100%;
+}
+
+.workout-skip-controls > select {
+  min-width: 0;
+  flex: 1 1 140px;
+}
+
+.workout-skip-controls > button {
+  flex: 0 1 auto;
   max-width: 100%;
 }
 
@@ -802,7 +845,6 @@ button:disabled {
 
 .workout-skip-controls select {
   width: auto;
-  flex: 1 1 140px;
 }
 
 .workout-set-list {
@@ -846,6 +888,10 @@ button:disabled {
   margin-top: 10px;
 }
 
+.workout-set-actions > button[type="submit"] {
+  flex: 1 1 180px;
+}
+
 .workout-set-actions button {
   min-height: 42px;
   min-width: 0;
@@ -854,6 +900,10 @@ button:disabled {
 .workout-set-actions > .workout-skip-controls {
   flex: 1 1 260px;
   min-width: 0;
+}
+
+.workout-set-actions > .workout-skip-controls {
+  align-items: stretch;
 }
 
 .workout-skip-controls button {
@@ -1012,7 +1062,12 @@ button:disabled {
 
   .bottom-nav {
     width: min(100vw - 18px, 920px);
-    bottom: 10px;
+    bottom: calc(10px + env(safe-area-inset-bottom));
+  }
+
+  .workout-completion-dock {
+    bottom: calc(96px + env(safe-area-inset-bottom));
+    width: min(920px, calc(100vw - 18px));
   }
 
   .workout-execution-head {
@@ -1054,5 +1109,13 @@ button:disabled {
   .workout-set-actions > button,
   .workout-set-actions > .workout-skip-controls {
     width: 100%;
+  }
+
+  .workout-set-actions > button[type="submit"] {
+    flex-basis: auto;
+  }
+
+  .workout-set-actions > .workout-skip-controls {
+    display: flex;
   }
 }

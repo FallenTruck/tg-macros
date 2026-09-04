@@ -36,11 +36,30 @@ fi
 
 echo "Deploying miniapp/ to s3://$bucket_name/ using stack $stack_name"
 
-# Keep the bucket's existing prefixed assets: index.html references these paths
-# and the bucket also contains older deployment-managed objects outside miniapp/.
-aws s3 sync miniapp/ "s3://$bucket_name/" "${aws_args[@]}" --only-show-errors
-aws s3 cp miniapp/app.js "s3://$bucket_name/miniapp/static/app.js" "${aws_args[@]}" --only-show-errors
-aws s3 cp miniapp/styles.css "s3://$bucket_name/miniapp/static/styles.css" "${aws_args[@]}" --only-show-errors
+# Keep the bucket's existing prefixed assets: older Mini App shells may still
+# reference them, and the bucket contains deployment-managed objects outside
+# miniapp/. A content-derived version makes each new shell request fresh URLs.
+staging_dir="$(mktemp -d "${TMPDIR:-/tmp}/javaanfitness-miniapp.XXXXXX")"
+cleanup() { rm -rf "$staging_dir"; }
+trap cleanup EXIT
+asset_version="$(shasum -a 256 miniapp/index.html miniapp/app.js miniapp/styles.css | shasum -a 256 | cut -c1-12)"
+sed "s/__MINIAPP_VERSION__/$asset_version/g" miniapp/index.html > "$staging_dir/index.html"
+cp miniapp/app.js "$staging_dir/app.js"
+cp miniapp/styles.css "$staging_dir/styles.css"
+
+aws s3 cp "$staging_dir/index.html" "s3://$bucket_name/index.html" "${aws_args[@]}" \
+  --cache-control "no-cache, no-store, must-revalidate" --content-type "text/html" --only-show-errors
+aws s3 cp "$staging_dir/app.js" "s3://$bucket_name/app.js" "${aws_args[@]}" \
+  --cache-control "public, max-age=31536000, immutable" --content-type "text/javascript" --only-show-errors
+aws s3 cp "$staging_dir/styles.css" "s3://$bucket_name/styles.css" "${aws_args[@]}" \
+  --cache-control "public, max-age=31536000, immutable" --content-type "text/css" --only-show-errors
+
+# Refresh the legacy paths too, with revalidation-friendly metadata for older
+# cached shells that cannot yet use the versioned root references.
+aws s3 cp "$staging_dir/app.js" "s3://$bucket_name/miniapp/static/app.js" "${aws_args[@]}" \
+  --cache-control "no-cache, max-age=0, must-revalidate" --content-type "text/javascript" --only-show-errors
+aws s3 cp "$staging_dir/styles.css" "s3://$bucket_name/miniapp/static/styles.css" "${aws_args[@]}" \
+  --cache-control "no-cache, max-age=0, must-revalidate" --content-type "text/css" --only-show-errors
 
 invalidation_id="$(aws cloudfront create-invalidation "${aws_args[@]}" \
   --distribution-id "$distribution_id" \

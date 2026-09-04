@@ -65,6 +65,36 @@ class MiniAppFrontendTests(unittest.TestCase):
         self.assertIn("data-skip-reason-select", source)
         self.assertNotIn('skip_reason: "intentionally_skipped"', source)
 
+    def test_workout_mode_visibility_and_sticky_completion_dock_are_explicit(self):
+        root = Path(__file__).parents[1]
+        source = (root / "miniapp" / "app.js").read_text(encoding="utf-8")
+        markup = (root / "miniapp" / "index.html").read_text(encoding="utf-8")
+        styles = (root / "miniapp" / "styles.css").read_text(encoding="utf-8")
+        self.assertIn('workoutProgrammeEl.hidden = state.workoutMode !== WORKOUT_PROGRAMME_MODE', source)
+        self.assertIn('workoutSessionEl.hidden = !active?.session || state.workoutMode !== WORKOUT_ACTIVE_MODE', source)
+        self.assertIn('id="workout-completion-dock"', markup)
+        self.assertIn('id="workout-session" class="workout-session" aria-live="polite" hidden', markup)
+        self.assertIn("function workoutCompletionSummary(active)", source)
+        self.assertIn("prescribed_set_count_min", source)
+        self.assertIn('summary.completed} / ${summary.total} exercises completed', source)
+        self.assertIn('data-action="submit-workout"', source)
+        self.assertIn("[hidden]", styles)
+        self.assertIn(".workout-session[hidden]", styles)
+        self.assertIn(".workout-programme[hidden]", styles)
+        self.assertIn(".workout-completion-dock", styles)
+        self.assertIn("position: fixed", styles)
+        self.assertIn("padding-bottom: calc(210px", styles)
+
+    def test_miniapp_assets_are_versioned_during_deployment(self):
+        root = Path(__file__).parents[1]
+        markup = (root / "miniapp" / "index.html").read_text(encoding="utf-8")
+        deploy_script = (root / "scripts" / "deploy_miniapp.sh").read_text(encoding="utf-8")
+        self.assertIn("/styles.css?v=__MINIAPP_VERSION__", markup)
+        self.assertIn("/app.js?v=__MINIAPP_VERSION__", markup)
+        self.assertIn("shasum -a 256 miniapp/index.html miniapp/app.js miniapp/styles.css", deploy_script)
+        self.assertIn('no-cache, no-store, must-revalidate', deploy_script)
+        self.assertIn('public, max-age=31536000, immutable', deploy_script)
+
 
 if __name__ == "__main__":
     unittest.main()

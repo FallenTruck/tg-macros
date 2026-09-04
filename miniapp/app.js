@@ -48,7 +48,9 @@ const questionnaireView = document.querySelector("#questionnaire-view");
 const workoutView = document.querySelector("#workout-view");
 const workoutProgrammeEl = document.querySelector("#workout-programme");
 const workoutSessionEl = document.querySelector("#workout-session");
+const workoutCompletionDockEl = document.querySelector("#workout-completion-dock");
 const workoutVersionMeta = document.querySelector("#workout-version-meta");
+const pageShell = document.querySelector(".page-shell");
 
 const welcomeTitle = document.querySelector("#welcome-title");
 const welcomeHandle = document.querySelector("#welcome-handle");
@@ -353,8 +355,12 @@ function renderWorkoutProgramme() {
   if (!programme || !Array.isArray(programme.days)) {
     return;
   }
-  workoutVersionMeta.textContent = programme.version?.version_id
-    ? `Version ${programme.version.version_id}`
+  const programmeVersionId = String(programme.version?.version_id || "");
+  const programmeVersionNumber = programmeVersionId.match(/-v(\d+)$/)?.[1];
+  workoutVersionMeta.textContent = programmeVersionId
+    ? programmeVersionNumber
+      ? `Programme v${programmeVersionNumber}`
+      : `Programme ${programmeVersionId}`
     : "Read-only programme";
   const exercises = Object.fromEntries((programme.exercises || []).map((item) => [item.exercise_id, item]));
   const activeSession = state.activeWorkout?.session;
@@ -399,6 +405,8 @@ function renderWorkoutSession() {
   }
   const active = state.activeWorkout;
   workoutSessionEl.hidden = !active?.session || state.workoutMode !== WORKOUT_ACTIVE_MODE;
+  pageShell?.classList.toggle("workout-active", Boolean(active?.session));
+  renderWorkoutCompletionDock(active);
   if (!active?.session) {
     workoutSessionEl.innerHTML = "";
     return;
@@ -421,11 +429,39 @@ function renderWorkoutSession() {
       <div class="workout-execution-list">
         ${(active.executions || []).map((execution) => renderWorkoutExecution(execution, exercises)).join("")}
       </div>
-      <div class="workout-session-submit">
-        <p class="workout-day-note">When every exercise is logged or skipped, submit this workout to save it to your history.</p>
-        <button class="primary" type="button" data-action="submit-workout">Submit Workout</button>
-      </div>
     </section>
+  `;
+}
+
+function workoutCompletionSummary(active) {
+  const executions = Array.isArray(active?.executions) ? active.executions : [];
+  const completed = executions.filter((execution) => {
+    if (execution.status === "skipped") {
+      return true;
+    }
+    const minimumSets = Math.max(1, Number(execution.prescribed_set_count_min) || 1);
+    return (execution.sets || []).length >= minimumSets;
+  }).length;
+  return {completed, total: executions.length, ready: executions.length > 0 && completed === executions.length};
+}
+
+function renderWorkoutCompletionDock(active) {
+  if (!workoutCompletionDockEl) {
+    return;
+  }
+  if (!active?.session) {
+    workoutCompletionDockEl.hidden = true;
+    workoutCompletionDockEl.innerHTML = "";
+    return;
+  }
+  const summary = workoutCompletionSummary(active);
+  workoutCompletionDockEl.hidden = false;
+  workoutCompletionDockEl.innerHTML = `
+    <div class="workout-completion-copy">
+      <span class="section-label">Workout progress</span>
+      <strong>${summary.completed} / ${summary.total} exercises completed</strong>
+    </div>
+    <button class="primary" type="button" data-action="submit-workout"${summary.ready ? "" : " disabled"}>Submit Workout</button>
   `;
 }
 

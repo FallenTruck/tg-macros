@@ -4,7 +4,7 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>Macro Setup</title>
-    <link rel="stylesheet" href="/miniapp/static/styles.css" />
+    <link rel="stylesheet" href="/styles.css?v=__MINIAPP_VERSION__" />
     <script src="https://telegram.org/js/telegram-web-app.js"></script>
   </head>
   <body>
@@ -85,7 +85,8 @@
             </div>
             <p class="lead-copy">The programme is shared. Your workout and set entries are private to your account.</p>
           </section>
-          <div id="workout-session" class="workout-session" aria-live="polite"></div>
+          <div id="workout-session" class="workout-session" aria-live="polite" hidden></div>
+          <div id="workout-completion-dock" class="workout-completion-dock" aria-live="polite" hidden></div>
           <div id="workout-programme" class="workout-programme" aria-live="polite">
             <section class="panel profile-panel"><p class="summary-empty">Open this Mini App from Telegram to load the programme.</p></section>
           </div>
@@ -285,6 +286,6 @@
       </a>
     </nav>
 
-    <script type="module" src="/miniapp/static/app.js"></script>
+    <script type="module" src="/app.js?v=__MINIAPP_VERSION__"></script>
   </body>
 </html>
