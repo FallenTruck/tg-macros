@@ -23,13 +23,22 @@ class MiniAppFrontendTests(unittest.TestCase):
 
     def test_workout_view_supports_start_resume_and_deterministic_set_logging(self):
         source = (Path(__file__).parents[1] / "miniapp" / "app.js").read_text(encoding="utf-8")
+        styles = (Path(__file__).parents[1] / "miniapp" / "styles.css").read_text(encoding="utf-8")
         self.assertIn('/api/workout/sessions', source)
         self.assertIn('/api/workout/sessions/active', source)
-        self.assertIn('data-action="start-workout"', source)
+        self.assertIn('"start-workout"', source)
+        self.assertIn('"resume-workout"', source)
+        self.assertIn('data-action="view-programme"', source)
+        self.assertIn('workoutMode: WORKOUT_PROGRAMME_MODE', source)
+        self.assertIn('setWorkoutMode(WORKOUT_ACTIVE_MODE, {scrollToSession: true})', source)
+        self.assertIn('window.scrollTo({top:', source)
         self.assertIn('data-action="skip-${kind}"', source)
         self.assertIn('data-set-form', source)
         self.assertIn('execution_expected_revision', source)
         self.assertIn('data-action="skip-${kind}"', source)
+        self.assertIn('.workout-set-actions > .workout-skip-controls', styles)
+        self.assertIn('grid-template-columns: minmax(0, 1fr)', styles)
+        self.assertIn('overflow-x: hidden', styles)
 
     def test_workout_skip_reason_selector_supports_readable_reasons_and_safe_default(self):
         source = (Path(__file__).parents[1] / "miniapp" / "app.js").read_text(encoding="utf-8")

@@ -21,6 +21,10 @@
   --shadow-soft: 0 14px 24px rgba(88, 62, 35, 0.07);
 }
 
+html {
+  overflow-x: hidden;
+}
+
 * {
   box-sizing: border-box;
 }
@@ -70,7 +74,7 @@ label,
 .page-shell {
   width: min(920px, calc(100vw - 24px));
   margin: 0 auto;
-  padding: 18px 0 112px;
+  padding: 18px 0 calc(124px + env(safe-area-inset-bottom));
 }
 
 .app-bar {
@@ -662,6 +666,39 @@ button:disabled {
   padding: 22px;
 }
 
+.workout-active-banner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 18px 22px;
+  background: linear-gradient(135deg, rgba(46, 105, 209, 0.1), rgba(255, 250, 244, 0.94));
+}
+
+.workout-active-banner .workout-day-note {
+  margin: 6px 0 0;
+}
+
+.workout-active-banner .workout-start-button {
+  width: auto;
+  margin-top: 0;
+  flex-shrink: 0;
+}
+
+.workout-session-head,
+.workout-session-actions {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.workout-session-actions {
+  align-items: center;
+  justify-content: flex-end;
+  flex-wrap: wrap;
+}
+
 .workout-start-button {
   width: 100%;
   margin-top: 16px;
@@ -694,12 +731,18 @@ button:disabled {
   gap: 12px;
 }
 
+.workout-execution-head > div:first-child {
+  min-width: 0;
+  flex: 1 1 auto;
+}
+
 .workout-skip-controls {
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;
   align-items: end;
   gap: 8px;
   min-width: min(100%, 280px);
+  max-width: 100%;
 }
 
 .workout-exercise-name,
@@ -726,6 +769,8 @@ button:disabled {
 .workout-choice-label select,
 .workout-set-form input,
 .workout-skip-controls select {
+  width: 100%;
+  min-width: 0;
   min-height: 42px;
   padding: 8px 10px;
   border: 1px solid var(--line-strong);
@@ -770,11 +815,19 @@ button:disabled {
 
 .workout-set-actions {
   justify-content: flex-start;
+  align-items: stretch;
+  flex-wrap: wrap;
   margin-top: 10px;
 }
 
 .workout-set-actions button {
   min-height: 42px;
+  min-width: 0;
+}
+
+.workout-set-actions > .workout-skip-controls {
+  flex: 1 1 260px;
+  min-width: 0;
 }
 
 .workout-skip-controls button {
@@ -942,5 +995,34 @@ button:disabled {
 
   .workout-skip-controls {
     margin-top: 12px;
+  }
+
+  .workout-active-banner,
+  .workout-session-head {
+    display: block;
+  }
+
+  .workout-active-banner .workout-start-button {
+    width: 100%;
+    margin-top: 14px;
+  }
+
+  .workout-session-actions {
+    justify-content: flex-start;
+    margin-top: 14px;
+  }
+
+  .workout-session-actions button {
+    flex: 1 1 120px;
+  }
+
+  .workout-set-actions {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .workout-set-actions > button,
+  .workout-set-actions > .workout-skip-controls {
+    width: 100%;
   }
 }

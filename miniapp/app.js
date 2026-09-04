@@ -5,6 +5,8 @@ const HOME_VIEW = "home";
 const PROFILE_VIEW = "profile";
 const QUESTIONNAIRE_VIEW = "questionnaire";
 const WORKOUT_VIEW = "workout";
+const WORKOUT_PROGRAMME_MODE = "programme";
+const WORKOUT_ACTIVE_MODE = "active";
 const WORKOUT_SKIP_REASONS = [
   ["recently_trained", "Recently trained"],
   ["time_constraint", "Time constraint"],
@@ -24,6 +26,7 @@ const state = {
   viewer: buildViewerFromTelegram(tg?.initDataUnsafe?.user ?? null),
   hasAuth: Boolean(initData),
   activeView: HOME_VIEW,
+  workoutMode: WORKOUT_PROGRAMME_MODE,
 };
 
 const form = document.querySelector("#questionnaire-form");
@@ -222,8 +225,10 @@ async function loadActiveWorkout() {
   try {
     const response = await apiFetch("/api/workout/sessions/active");
     state.activeWorkout = response.session || null;
-    renderWorkoutSession();
-    renderWorkoutProgramme();
+    setWorkoutMode(
+      state.activeWorkout ? WORKOUT_ACTIVE_MODE : WORKOUT_PROGRAMME_MODE,
+      {scrollToSession: Boolean(state.activeWorkout && state.activeView === WORKOUT_VIEW)},
+    );
   } catch (error) {
     if (workoutSessionEl) {
       workoutSessionEl.innerHTML = `<section class="panel profile-panel"><p class="summary-empty">${escapeHtml(error.message || "Could not load the active workout.")}</p></section>`;
@@ -311,6 +316,7 @@ function syncRoute() {
 }
 
 function renderRoute(route) {
+  const enteringWorkout = route === WORKOUT_VIEW && state.activeView !== WORKOUT_VIEW;
   state.activeView = route;
   homeView.hidden = route !== HOME_VIEW;
   profileView.hidden = route !== PROFILE_VIEW;
@@ -333,12 +339,16 @@ function renderRoute(route) {
   }
 
   renderPreview();
+  if (enteringWorkout && state.activeWorkout?.session) {
+    setWorkoutMode(WORKOUT_ACTIVE_MODE, {scrollToSession: true});
+  }
 }
 
 function renderWorkoutProgramme() {
   if (!workoutProgrammeEl) {
     return;
   }
+  workoutProgrammeEl.hidden = state.workoutMode !== WORKOUT_PROGRAMME_MODE;
   const programme = state.workoutProgramme;
   if (!programme || !Array.isArray(programme.days)) {
     return;
@@ -347,7 +357,16 @@ function renderWorkoutProgramme() {
     ? `Version ${programme.version.version_id}`
     : "Read-only programme";
   const exercises = Object.fromEntries((programme.exercises || []).map((item) => [item.exercise_id, item]));
-  workoutProgrammeEl.innerHTML = programme.days.map((day) => `
+  const activeSession = state.activeWorkout?.session;
+  const activeBanner = activeSession ? `
+    <section class="panel workout-active-banner">
+      <div>
+        <p class="section-label">Workout in progress</p>
+        <p class="workout-day-note">${escapeHtml(workoutName(activeSession))} is ready to resume.</p>
+      </div>
+      <button class="primary workout-start-button" type="button" data-action="show-active-workout">Resume Workout</button>
+    </section>` : "";
+  workoutProgrammeEl.innerHTML = activeBanner + programme.days.map((day) => `
     <section class="panel workout-day-card">
       <div class="panel-head">
         <div>
@@ -368,9 +387,10 @@ function renderWorkoutProgramme() {
 function workoutDayAction(day) {
   const activeSession = state.activeWorkout?.session;
   const isActiveDay = activeSession?.programme_day_id === day.day_code;
+  const action = activeSession && isActiveDay ? "resume-workout" : "start-workout";
   const label = activeSession ? (isActiveDay ? "Resume Workout" : "Workout already active") : `Start ${day.display_name || day.day_code}`;
   const disabled = activeSession && !isActiveDay ? " disabled" : "";
-  return `<button class="primary workout-start-button" type="button" data-action="start-workout" data-workout-day="${escapeHtml(day.day_code)}"${disabled}>${escapeHtml(label)}</button>`;
+  return `<button class="primary workout-start-button" type="button" data-action="${action}" data-workout-day="${escapeHtml(day.day_code)}"${disabled}>${escapeHtml(label)}</button>`;
 }
 
 function renderWorkoutSession() {
@@ -378,6 +398,7 @@ function renderWorkoutSession() {
     return;
   }
   const active = state.activeWorkout;
+  workoutSessionEl.hidden = !active?.session || state.workoutMode !== WORKOUT_ACTIVE_MODE;
   if (!active?.session) {
     workoutSessionEl.innerHTML = "";
     return;
@@ -386,12 +407,15 @@ function renderWorkoutSession() {
   const session = active.session;
   workoutSessionEl.innerHTML = `
     <section class="panel workout-session-panel">
-      <div class="panel-head">
+      <div class="workout-session-head">
         <div>
           <p class="section-label">In progress</p>
-          <h3>${escapeHtml(session.programme_day_id)} workout</h3>
+          <h3>${escapeHtml(workoutName(session))}</h3>
         </div>
-        <button class="ghost-button" type="button" data-action="cancel-workout">Cancel</button>
+        <div class="workout-session-actions">
+          <button class="ghost-button" type="button" data-action="view-programme">← View programme</button>
+          <button class="ghost-button" type="button" data-action="cancel-workout">Cancel</button>
+        </div>
       </div>
       <p class="workout-day-note">Started ${escapeHtml(formatIso(session.started_at))}. Your entries are saved as you go.</p>
       <div class="workout-execution-list">
@@ -399,6 +423,31 @@ function renderWorkoutSession() {
       </div>
     </section>
   `;
+}
+
+function workoutName(session) {
+  const day = (state.workoutProgramme?.days || []).find((item) => item.day_code === session.programme_day_id);
+  return day?.display_name || `${session.programme_day_id} workout`;
+}
+
+function scrollToActiveWorkout() {
+  if (!workoutSessionEl || typeof window.scrollTo !== "function") {
+    return;
+  }
+  const top = workoutSessionEl.getBoundingClientRect().top + window.scrollY - 12;
+  window.scrollTo({top: Math.max(0, top), behavior: "auto"});
+}
+
+function setWorkoutMode(mode, {scrollToSession = false} = {}) {
+  state.workoutMode = mode === WORKOUT_ACTIVE_MODE && state.activeWorkout?.session
+    ? WORKOUT_ACTIVE_MODE
+    : WORKOUT_PROGRAMME_MODE;
+  renderWorkoutSession();
+  renderWorkoutProgramme();
+  if (scrollToSession && state.workoutMode === WORKOUT_ACTIVE_MODE) {
+    const schedule = window.requestAnimationFrame || ((callback) => setTimeout(callback, 0));
+    schedule(scrollToActiveWorkout);
+  }
 }
 
 function renderWorkoutExecution(execution, exercises) {
@@ -480,12 +529,19 @@ async function handleWorkoutClick(event) {
   if (!button || button.disabled) return;
   const action = button.dataset.action;
   try {
-    if (action === "start-workout") {
+    if (action === "start-workout" || action === "resume-workout") {
       const response = await apiFetch("/api/workout/sessions", {method: "POST", body: JSON.stringify({day_code: button.dataset.workoutDay})});
       state.activeWorkout = response.session;
-      renderWorkoutSession();
-      renderWorkoutProgramme();
+      setWorkoutMode(WORKOUT_ACTIVE_MODE, {scrollToSession: true});
       setStatus("Workout saved. Log each set as you complete it.", "success");
+      return;
+    }
+    if (action === "show-active-workout") {
+      setWorkoutMode(WORKOUT_ACTIVE_MODE, {scrollToSession: true});
+      return;
+    }
+    if (action === "view-programme") {
+      setWorkoutMode(WORKOUT_PROGRAMME_MODE);
       return;
     }
     if (action === "skip-exercise") {
@@ -505,8 +561,7 @@ async function handleWorkoutClick(event) {
     if (action === "cancel-workout") {
       const response = await apiFetch(`/api/workout/sessions/${encodeURIComponent(state.activeWorkout.session.session_id)}/cancel`, {method: "POST", body: JSON.stringify({expected_revision: state.activeWorkout.session.revision})});
       state.activeWorkout = null;
-      renderWorkoutSession();
-      renderWorkoutProgramme();
+      setWorkoutMode(WORKOUT_PROGRAMME_MODE);
       setStatus("Workout cancelled. Your saved history remains intact.", "info");
       return response;
     }
