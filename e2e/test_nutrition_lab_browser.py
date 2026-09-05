@@ -12,6 +12,8 @@ from tests import test_nutrition_lab as fixtures
 class NutritionLabBrowserTests(unittest.TestCase):
     def test_browser_lab_controls_and_normal_account_visibility(self):
         from playwright.sync_api import sync_playwright
+        from scripts.nutrition_corpus import case_by_id, image_path
+        food_case = case_by_id("astons-all-day-breakfast-001")
         fixture = fixtures.LabTests()
         fixture.setUp()
         fixture.s3.get_object.side_effect = lambda **kw: {"Body": __import__("io").BytesIO(fixture.s3.put_object.call_args.kwargs["Body"])}
@@ -51,8 +53,8 @@ class NutritionLabBrowserTests(unittest.TestCase):
                 page.goto("https://testserver/")
                 page.get_by_test_id("nav-nutrition").click()
                 page.get_by_test_id("nutrition-lab").wait_for(state="visible")
-                page.get_by_test_id("lab-image").set_input_files(str(project / "images/6143401176322477320.jpg"))
-                page.get_by_test_id("lab-caption").fill("Scrambled eggs, sausages, pasta, mashed potato, and grilled meat with sauce")
+                page.get_by_test_id("lab-image").set_input_files(str(image_path(food_case)))
+                page.get_by_test_id("lab-caption").fill(food_case["caption"])
                 page.get_by_test_id("lab-submit").click()
                 page.get_by_test_id("lab-json").wait_for(state="visible")
                 self.assertNotIn("action", json.loads(page.get_by_test_id("lab-json").inner_text()))

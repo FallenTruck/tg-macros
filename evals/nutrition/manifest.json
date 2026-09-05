@@ -2,12 +2,214 @@
   {
     "id": "astons-all-day-breakfast-001",
     "image": "../../images/6143401176322477320.jpg",
-    "caption": "Astons All Day breakfast",
-    "label_status": "unlabelled",
+    "caption": "Scrambled eggs, sausages, mac and cheese, mashed potato, and grilled meat with sauce",
+    "label_status": "component_labelled",
+    "expected_visible_components": [
+      "mac and cheese"
+    ],
+    "known_portions_g": {},
+    "acceptable_macro_range": {},
+    "follow_up_expected": null,
+    "notes": "Mac and cheese confirmed by the user. Other caption components are visual observations; recipe, weights and macros are unknown.",
+    "food_type": "mixed_plate",
+    "tags": [
+      "eggs",
+      "sausage",
+      "mac_and_cheese",
+      "grilled_meat",
+      "sauce",
+      "multiple_sides"
+    ],
+    "source": {
+      "kind": "repository_photo",
+      "file": "images/6143401176322477320.jpg",
+      "license": "existing repository asset; no new redistribution grant"
+    },
+    "annotations": [
+      {
+        "component": "mac and cheese",
+        "provenance": "user correction in Codex conversation",
+        "date": "2026-09-05",
+        "replaces": "pasta"
+      }
+    ],
+    "image_sha256": "8a53e80a96bb9a25b4575e68228933f5902ff080be2f48f5fda9cbded450a648"
+  },
+  {
+    "id": "chicken-rice-001",
+    "image": "images/chicken-rice-001.jpg",
+    "image_sha256": "fe9e473b90de0c1a899bd08df9907503b620f6982142f3b17e3e280bd27e7fbc",
+    "caption": "Hainanese chicken rice",
+    "food_type": "rice_plate",
+    "tags": [
+      "rice",
+      "poultry",
+      "skin",
+      "sauce"
+    ],
+    "source": {
+      "kind": "wikimedia_commons",
+      "title": "File:Hainanese Chicken Rice.jpg",
+      "url": "https://commons.wikimedia.org/wiki/File:Hainanese_Chicken_Rice.jpg",
+      "download_url": "https://upload.wikimedia.org/wikipedia/commons/7/71/Hainanese_Chicken_Rice.jpg?utm_source=commons.wikimedia.org&utm_campaign=imageinfo&utm_content=original",
+      "author": "No machine-readable author provided. Terence assumed (based on copyright claims).",
+      "license": "CC BY 2.5",
+      "license_url": "https://creativecommons.org/licenses/by/2.5",
+      "downloaded_at": "2026-09-05",
+      "modifications": "none"
+    },
+    "label_status": "source_labelled",
     "expected_visible_components": [],
     "known_portions_g": {},
     "acceptable_macro_range": {},
     "follow_up_expected": null,
-    "notes": "Retained photo has no defensible component- or macro-level ground truth. Use for optional live smoke/structural checks only."
+    "notes": "Dish label comes from the attributed source, not verified ingredients or nutrition. Portions and macros are unlabelled."
+  },
+  {
+    "id": "masala-dosa-001",
+    "image": "images/masala-dosa-001.jpg",
+    "image_sha256": "1eaca189771ea9ecb3de8c49d5dacc77e88802b5d788c8cf5fed34fe9bf709b0",
+    "caption": "Masala dosa with chutneys; foreground plate only",
+    "food_type": "dosa",
+    "tags": [
+      "hidden_filling",
+      "chutney",
+      "crepe",
+      "background_food",
+      "warm_lighting"
+    ],
+    "source": {
+      "kind": "wikimedia_commons",
+      "title": "File:Dosai Chutney Hotel Saravana Bhavan.jpg",
+      "url": "https://commons.wikimedia.org/wiki/File:Dosai_Chutney_Hotel_Saravana_Bhavan.jpg",
+      "download_url": "https://upload.wikimedia.org/wikipedia/commons/a/a4/Dosai_Chutney_Hotel_Saravana_Bhavan.jpg?utm_source=commons.wikimedia.org&utm_campaign=imageinfo&utm_content=original",
+      "author": "Mike Linksvayer",
+      "license": "CC BY 2.0",
+      "license_url": "https://creativecommons.org/licenses/by/2.0",
+      "downloaded_at": "2026-09-05",
+      "modifications": "none"
+    },
+    "label_status": "source_labelled",
+    "expected_visible_components": [],
+    "known_portions_g": {},
+    "acceptable_macro_range": {},
+    "follow_up_expected": null,
+    "notes": "Dish label comes from the attributed source, not verified ingredients or nutrition. Portions and macros are unlabelled."
+  },
+  {
+    "id": "greek-salad-001",
+    "image": "images/greek-salad-001.jpg",
+    "image_sha256": "f8f49878a0c2e5d80358e20f8356a28dda943a44a2970d4c12fed221756fb422",
+    "caption": "Greek salad",
+    "food_type": "salad",
+    "tags": [
+      "vegetables",
+      "cheese",
+      "dressing"
+    ],
+    "source": {
+      "kind": "wikimedia_commons",
+      "title": "File:Flickr - cyclonebill - Græsk salat.jpg",
+      "url": "https://commons.wikimedia.org/wiki/File:Flickr_-_cyclonebill_-_Gr%C3%A6sk_salat.jpg",
+      "download_url": "https://upload.wikimedia.org/wikipedia/commons/5/54/Flickr_-_cyclonebill_-_Gr%C3%A6sk_salat.jpg?utm_source=commons.wikimedia.org&utm_campaign=imageinfo&utm_content=original",
+      "author": "cyclonebill",
+      "license": "CC BY-SA 2.0",
+      "license_url": "https://creativecommons.org/licenses/by-sa/2.0",
+      "downloaded_at": "2026-09-05",
+      "modifications": "none"
+    },
+    "label_status": "source_labelled",
+    "expected_visible_components": [],
+    "known_portions_g": {},
+    "acceptable_macro_range": {},
+    "follow_up_expected": null,
+    "notes": "Dish label comes from the attributed source, not verified ingredients or nutrition. Portions and macros are unlabelled."
+  },
+  {
+    "id": "chicken-biryani-001",
+    "image": "images/chicken-biryani-001.jpg",
+    "image_sha256": "f11923253606c3dcf86a9317928d7121da448e1886e8ea3e825950a2b3efd4cd",
+    "caption": "Chicken biryani",
+    "food_type": "mixed_rice",
+    "tags": [
+      "rice",
+      "poultry",
+      "hidden_oil"
+    ],
+    "source": {
+      "kind": "wikimedia_commons",
+      "title": "File:ChickenBiryani.jpg",
+      "url": "https://commons.wikimedia.org/wiki/File:ChickenBiryani.jpg",
+      "download_url": "https://upload.wikimedia.org/wikipedia/commons/a/af/ChickenBiryani.jpg?utm_source=commons.wikimedia.org&utm_campaign=imageinfo&utm_content=original",
+      "author": "Delhifoodwalks",
+      "license": "CC BY-SA 4.0",
+      "license_url": "https://creativecommons.org/licenses/by-sa/4.0",
+      "downloaded_at": "2026-09-05",
+      "modifications": "none"
+    },
+    "label_status": "source_labelled",
+    "expected_visible_components": [],
+    "known_portions_g": {},
+    "acceptable_macro_range": {},
+    "follow_up_expected": null,
+    "notes": "Dish label comes from the attributed source, not verified ingredients or nutrition. Portions and macros are unlabelled."
+  },
+  {
+    "id": "laksa-001",
+    "image": "images/laksa-001.jpg",
+    "image_sha256": "e6e68e612268dce6207aa4741c0d81d400a1d70d0de591fb2de309c4e41ac8d1",
+    "caption": "Laksa",
+    "food_type": "noodle_soup",
+    "tags": [
+      "noodles",
+      "broth",
+      "occlusion"
+    ],
+    "source": {
+      "kind": "wikimedia_commons",
+      "title": "File:Laksa.JPG",
+      "url": "https://commons.wikimedia.org/wiki/File:Laksa.JPG",
+      "download_url": "https://upload.wikimedia.org/wikipedia/commons/d/d6/Laksa.JPG?utm_source=commons.wikimedia.org&utm_campaign=imageinfo&utm_content=original",
+      "author": "Kcdtsg",
+      "license": "Public domain",
+      "license_url": "https://commons.wikimedia.org/wiki/File:Laksa.JPG",
+      "downloaded_at": "2026-09-05",
+      "modifications": "none"
+    },
+    "label_status": "source_labelled",
+    "expected_visible_components": [],
+    "known_portions_g": {},
+    "acceptable_macro_range": {},
+    "follow_up_expected": null,
+    "notes": "Dish label comes from the attributed source, not verified ingredients or nutrition. Portions and macros are unlabelled."
+  },
+  {
+    "id": "mac-and-cheese-001",
+    "image": "images/mac-and-cheese-001.jpg",
+    "image_sha256": "dd38a0a61958391783937a980babfeb31bf53a6744b79666a81af779de36ef65",
+    "caption": "Mac and cheese",
+    "food_type": "mac_and_cheese",
+    "tags": [
+      "cheese",
+      "sauce",
+      "portion_depth"
+    ],
+    "source": {
+      "kind": "wikimedia_commons",
+      "title": "File:Macaroni and cheese (3).jpg",
+      "url": "https://commons.wikimedia.org/wiki/File:Macaroni_and_cheese_(3).jpg",
+      "download_url": "https://upload.wikimedia.org/wikipedia/commons/3/37/Macaroni_and_cheese_%283%29.jpg?utm_source=commons.wikimedia.org&utm_campaign=imageinfo&utm_content=original",
+      "author": "@joefoodie from USA",
+      "license": "CC BY 2.0",
+      "license_url": "https://creativecommons.org/licenses/by/2.0",
+      "downloaded_at": "2026-09-05",
+      "modifications": "none"
+    },
+    "label_status": "source_labelled",
+    "expected_visible_components": [],
+    "known_portions_g": {},
+    "acceptable_macro_range": {},
+    "follow_up_expected": null,
+    "notes": "Dish label comes from the attributed source, not verified ingredients or nutrition. Portions and macros are unlabelled."
   }
 ]

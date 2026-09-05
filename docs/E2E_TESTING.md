@@ -254,3 +254,18 @@ layout, and logged-out denial. It produces `nutrition-lab-estimate-mobile.png`,
 `artifacts/e2e/`, alongside `nutrition-lab-live-results.json` containing the
 three structured run results. Tests assert pipeline behavior and structure, not nutritional
 accuracy without human-reviewed labels.
+
+### Persistent food corpus and variance runs
+
+The real-image registry now lives in `evals/nutrition/manifest.json`, with a
+persistent local SQLite history at `artifacts/nutrition/corpus.sqlite3`. Run
+`make nutrition-corpus` to validate/sync it and `make nutrition-variance` to read
+the latest report. For repeated real browser estimates use
+`scripts/nutrition_variance.py --live --repeats 3`; it selects only estimate-only
+mode, preserves domain records, and saves results before Lab job TTL expiry.
+`--variants both` compares fixed labelled captions against no caption, in
+separate statistical groups. See [the corpus guide](../evals/nutrition/README.md)
+for the seven initial foods, image attribution, label rules, and historical
+results. `JAVAAN_E2E_CASE` selects a registry fixture for the existing full-flow
+smoke. The default breakfast caption now uses the user-confirmed **mac and
+cheese** label.

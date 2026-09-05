@@ -294,11 +294,13 @@ class LiveJavaanFitnessE2ETests(unittest.TestCase):
 
     def test_live_nutrition_lab(self):
         """Real image + real OpenAI, with no numeric accuracy claims."""
-        image = Path(os.getenv("JAVAAN_E2E_MEAL_IMAGE", "images/6143401176322477320.jpg")).resolve()
+        from scripts.nutrition_corpus import case_by_id, image_path
+        fixture = case_by_id(os.getenv("JAVAAN_E2E_CASE", "astons-all-day-breakfast-001"))
+        image = Path(os.getenv("JAVAAN_E2E_MEAL_IMAGE", str(image_path(fixture)))).resolve()
         if not image.is_file():
             self.fail("JAVAAN_E2E_MEAL_IMAGE must point to a real meal photograph")
         caption = os.getenv("JAVAAN_E2E_MEAL_CAPTION", "" if os.getenv("JAVAAN_E2E_MEAL_IMAGE") else
-                            "Scrambled eggs, sausages, pasta, mashed potato, and grilled meat with sauce")
+                            fixture["caption"])
         output_dir = Path("artifacts/e2e")
         output_dir.mkdir(parents=True, exist_ok=True)
         playwright, browser = self._new_browser()

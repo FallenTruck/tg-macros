@@ -1,4 +1,4 @@
-.PHONY: e2e-nutrition-lab sync-runtime nutrition-eval deploy-miniapp e2e-install e2e-provision e2e-reset e2e-smoke e2e-screenshots
+.PHONY: nutrition-corpus nutrition-variance e2e-nutrition-lab sync-runtime nutrition-eval deploy-miniapp e2e-install e2e-provision e2e-reset e2e-smoke e2e-screenshots
 
 RUNTIME_DIR = lambda_handlers/runtime
 AWS_PROFILE ?= fitness-dev
@@ -43,3 +43,10 @@ e2e-screenshots:
 e2e-nutrition-lab:
 	AWS_PROFILE="$(AWS_PROFILE)" AWS_REGION="$(AWS_REGION)" AWS_DEFAULT_REGION="$(AWS_REGION)" $(E2E_PYTHON) scripts/reset_e2e_account.py --yes
 	RUN_JAVAAN_E2E=1 AWS_PROFILE="$(AWS_PROFILE)" AWS_REGION="$(AWS_REGION)" AWS_DEFAULT_REGION="$(AWS_REGION)" $(E2E_PYTHON) -m unittest e2e.test_live_app.LiveJavaanFitnessE2ETests.test_live_nutrition_lab
+
+
+nutrition-corpus:
+	$(E2E_PYTHON) scripts/nutrition_variance.py
+
+nutrition-variance:
+	$(E2E_PYTHON) scripts/nutrition_variance.py --report
