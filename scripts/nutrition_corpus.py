@@ -43,11 +43,21 @@ def load_cases(manifest=DEFAULT_MANIFEST):
             raise ValueError(f"Missing fixture metadata: {case_id}")
         if len(case["caption"]) > 1000:
             raise ValueError(f"Caption too long: {case_id}")
+        from scripts.nutrition_groundtruth import validate_ground_truth, require_private_output
+        if private_case(case) or path.is_relative_to(ROOT / "artifacts/nutrition/private"):
+            require_private_output(manifest)
+            require_private_output(path)
+        validate_ground_truth(case)
     return cases
 
 
 def image_path(case, manifest=DEFAULT_MANIFEST):
     return (Path(manifest).resolve().parent / case["image"]).resolve()
+
+
+def private_case(case):
+    source = case.get("source", {})
+    return source.get("redistribution") == "private_local_only" or source.get("kind") == "authorized_private_telegram_submission"
 
 
 def case_by_id(case_id, manifest=DEFAULT_MANIFEST):
@@ -59,7 +69,12 @@ def caption_for(case, variant):
         return ""
     if variant == "labelled":
         return case["caption"]
-    raise ValueError("Caption variant must be labelled or none")
+    if variant == "generic":
+        return case.get("generic_caption", case["caption"])
+    if variant == "fact-rich":
+        from scripts.nutrition_groundtruth import fact_rich_caption
+        return fact_rich_caption(case)
+    raise ValueError("Unknown caption variant")
 
 
 def estimator_version(job):
@@ -73,6 +88,7 @@ class CorpusDatabase:
         self.path = Path(path)
         self.path.parent.mkdir(parents=True, exist_ok=True)
         self.connection = sqlite3.connect(str(self.path))
+        self.path.chmod(0o600)
         self.connection.row_factory = sqlite3.Row
         self.connection.execute("PRAGMA foreign_keys=ON")
         self.connection.executescript("""
@@ -102,6 +118,9 @@ class CorpusDatabase:
     def sync_cases(self, cases):
         with self.connection:
             for case in cases:
+                if private_case(case):
+                    from scripts.nutrition_groundtruth import require_private_output
+                    require_private_output(self.path)
                 self.connection.execute("""INSERT INTO cases VALUES (?, ?, ?, ?)
                     ON CONFLICT(case_id) DO UPDATE SET image_sha256=excluded.image_sha256,
                     food_type=excluded.food_type, metadata_json=excluded.metadata_json""",
@@ -115,6 +134,9 @@ class CorpusDatabase:
         return batch_id
 
     def record(self, batch_id, case, variant, repeat_index, latency_ms, *, job=None, error_category=None):
+        if private_case(case):
+            from scripts.nutrition_groundtruth import require_private_output
+            require_private_output(self.path)
         estimate = job.get("estimate") if job else None
         if job is not None:
             if job.get("mode") != "estimate" or "action" in job or job.get("status") != "complete":
@@ -139,6 +161,12 @@ class CorpusDatabase:
     def finish(self, batch_id, status="complete"):
         with self.connection:
             self.connection.execute("UPDATE batches SET status=? WHERE batch_id=?", (status, batch_id))
+
+    def update_settings(self, batch_id, evidence):
+        row = self.connection.execute("SELECT settings_json FROM batches WHERE batch_id=?", (batch_id,)).fetchone()
+        settings = {**json.loads(row[0]), **evidence}
+        with self.connection:
+            self.connection.execute("UPDATE batches SET settings_json=? WHERE batch_id=?", (json.dumps(settings), batch_id))
 
     def report(self, batch_id=None):
         if batch_id is None:

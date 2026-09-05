@@ -3,7 +3,7 @@
     "id": "astons-all-day-breakfast-001",
     "image": "../../images/6143401176322477320.jpg",
     "caption": "Scrambled eggs, sausages, mac and cheese, mashed potato, and grilled meat with sauce",
-    "label_status": "component_labelled",
+    "label_status": "ground_truth",
     "expected_visible_components": [
       "mac and cheese"
     ],
@@ -33,7 +33,45 @@
         "replaces": "pasta"
       }
     ],
-    "image_sha256": "8a53e80a96bb9a25b4575e68228933f5902ff080be2f48f5fda9cbded450a648"
+    "image_sha256": "8a53e80a96bb9a25b4575e68228933f5902ff080be2f48f5fda9cbded450a648",
+    "ground_truth": {
+      "schema_version": 1,
+      "confidence_tier": "C",
+      "source_type": "identity_confirmation",
+      "values_kind": "facts",
+      "provenance": {
+        "date": "2026-09-05",
+        "source": "user correction preserved in the public corpus annotation",
+        "method": "user_confirmation",
+        "reference": "Existing annotation: mac and cheese replaces pasta; user correction in Codex conversation"
+      },
+      "components_complete": false,
+      "components": [
+        {
+          "name": "mac and cheese",
+          "aliases": [
+            "macaroni and cheese"
+          ],
+          "major": true,
+          "present": true
+        }
+      ],
+      "notes": "Only mac-and-cheese identity is confirmed. Other meal components, quantities and macros remain unlabelled."
+    },
+    "generic_caption": "All-day breakfast plate",
+    "label_history": [
+      {
+        "previous": {
+          "label_status": "component_labelled"
+        },
+        "replaced_by": {
+          "date": "2026-09-05",
+          "source": "user correction preserved in the public corpus annotation",
+          "method": "user_confirmation",
+          "reference": "Existing annotation: mac and cheese replaces pasta; user correction in Codex conversation"
+        }
+      }
+    ]
   },
   {
     "id": "chicken-rice-001",

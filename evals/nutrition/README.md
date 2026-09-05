@@ -1,10 +1,11 @@
 # Real-food regression corpus
 
-This is intentionally a **repeatability/variance corpus, not yet an accuracy
-benchmark**. Cases still mostly lack weighed portions and defensible macro
-ground truth. Repeated estimates measure consistency; accuracy measurements
-require independently documented reference labels. Previous model estimates
-must not be used as ground truth.
+This corpus supports **separate repeatability and ground-truth accuracy
+evaluation**. Most photographs still lack weighed portions or complete macro
+truth. Infrastructure support does not establish numeric accuracy: only
+independently documented Tier A totals can do that. Previous model estimates
+must never become ground truth. See the [ground-truth contract](GROUND_TRUTH_SCHEMA.md)
+and [frozen baseline record](ACCURACY_BASELINE.md).
 
 The versioned `manifest.json` and image files are the fixture registry. The local
 SQLite database at `artifacts/nutrition/corpus.sqlite3` keeps cases, batches, and
@@ -138,3 +139,108 @@ photos remain ignored under `artifacts/nutrition/private/`. Use `--manifest` to
 include them. Original captions are preserved, and visual review tags distinguish
 shared plates, packaging, product photos and screenshot/framing variants. These
 references add realistic coverage but still do not establish macro accuracy.
+
+## Enter defensible labels
+
+- **Tier A:** weighed edible ingredients, weighed cooked portions with a known
+  nutritional reference, package label with known consumed quantity, official
+  restaurant nutrition with known consumed serving, or a weighed recipe with
+  known consumed fraction. Complete meal macros and numeric error are supported.
+- **Tier B:** independently known component facts, such as counts, edible grams,
+  or whether skin was removed. Score only the dimensions actually supported.
+- **Tier C:** confirmed identity/presence/absence. No portion or macro-error claims.
+
+Source dish names, visual guesses, model-reported portions, old logged estimates,
+other LLM answers, and generic nutrition database values without known consumed
+quantity are not numeric truth. A user caption qualifies only for the explicit
+known fact it contains. Do not infer equal consumption from “shared by two”.
+
+```bash
+make nutrition-label CASE=astons-all-day-breakfast-001
+# Set EDITOR for the local JSON editor, or provide independent label JSON:
+make nutrition-label CASE=<id> LABEL=artifacts/nutrition/private/label-input.json \
+  NUTRITION_MANIFEST=artifacts/nutrition/private/manifest.json
+make nutrition-groundtruth-check
+make nutrition-groundtruth-check \
+  NUTRITION_MANIFEST=artifacts/nutrition/private/manifest.json
+```
+
+The tool shows the image path and metadata. Supply `ground_truth` following the
+contract and optionally `generic_caption`; the original caption is preserved.
+It never fills missing facts. It validates image hash, provenance, tiers,
+quantities and arithmetic, then writes only the selected manifest atomically.
+Prior labels and provenance stay in `label_history`. The editor file is private
+and temporary. Keep input files under ignored `artifacts/nutrition/private/`.
+Never store credentials, session data, Telegram file IDs, or unrelated chat data.
+
+For weighed meals, record **edible consumed** cooked grams and a matching
+cooked-food reference with its source location. For packages, record the exact
+product/label reference, per-100g or per-serving macros, and consumed grams or
+known servings. For restaurants, record the official document, exact item and
+customizations, and consumed serving/fraction. The dish name alone is insufficient.
+For recipes, record weighed ingredients and the known consumed fraction, then
+enter each ingredient's consumed share; fraction metadata is not applied twice.
+
+The CLI derives nutrition only from supplied quantities and references,
+persisting the arithmetic. It preserves official supplied totals and rejects
+disagreement. Add no numeric label when evidence is unavailable. Review aliases
+before freezing a baseline; ambiguous matches remain unmatched. Private fixture
+manifests and images must stay in the ignored artifact area. The private manifest
+cannot silently publish a fixture through the label tool.
+
+## Run and freeze an accuracy baseline
+
+```bash
+# Read the existing baseline; no model calls or account reset:
+make nutrition-accuracy
+
+# Explicit selection/opt-in; prints planned paid calls before authentication:
+AWS_PROFILE=fitness-dev AWS_REGION=ap-southeast-1 \
+  .venv/bin/python scripts/nutrition_accuracy.py --live \
+  --manifest artifacts/nutrition/private/manifest.json \
+  --case <labelled-id> --repeats 2 \
+  --variant none --variant generic --variant fact-rich \
+  --output artifacts/nutrition/accuracy-baseline.json
+
+# Rebuild offline from ORIGINAL immutable per-run label snapshots:
+.venv/bin/python scripts/nutrition_accuracy.py --batch <batch-id> \
+  --output artifacts/nutrition/accuracy-review.json
+```
+
+No Make target opts into live accuracy calls. Live accuracy requires `--case`;
+repeats accept 1–20. One repeat has no SD/CV. Existing output files are refused
+before model calls, protecting the frozen baseline. Generated reports/databases
+are restricted to ignored `artifacts/nutrition/`. Label revisions affect future
+batches, never historical snapshots.
+
+Variants: `none` is empty; `generic` uses the explicit generic caption or falls
+back to the original caption; `labelled` preserves the original caption;
+`fact-rich` uses only annotated names, quantities and preparation facts, never
+target macros. At Tier C it adds identity facts only, with no measured-portion
+information. Inspect the exact saved strings. All variants must retain the same
+image and ground-truth hash. Pairwise comparisons use shared case sets, with
+models/application versions separate and failures visible.
+
+Live accuracy uses the deployed browser Lab, only as `javaan-e2e`, and uploads
+estimate-only jobs, then polls their exact IDs. It never selects correction,
+confirm, cancel, or reset. The pinned baseline is `nutrition-estimator-v2 / gpt-5.4`;
+a mismatch stops further calls and invalidates the batch. SQLite preserves raw
+jobs, server version, latency, captions and label snapshots before Lab TTL expiry.
+Reports include per-run actual/best/low/high, errors, coverage/width, portions,
+identity, follow-ups and reconciliation. Existing SD, CV and item-name stability
+remain explicitly separate from accuracy.
+
+Whole synthetic user-partition hashes/counts are recorded before and after,
+including failures, and logout is verified. Invalid contexts cannot support
+accuracy claims. Login/logout manage normal browser session records; the
+**estimate operation** has zero FitnessData writes, tested by the offline Lab
+isolation suite. State hashes prove unchanged domain state, not a write-by-write
+audit. No source-user priors are imported. No clean deployed prior toggle exists,
+so enabled-versus-absent priors are deferred without changing production behavior.
+
+For the next calibration goal, preserve the frozen image hashes, labels, captions,
+context and versions. Add weighed Tier A cases before numeric accuracy claims.
+Human-reviewed poor cases may carry failure categories with evidence; estimator
+assumptions are not authoritative reviews. Optimize only in that next goal,
+comparing case-balanced error **and** interval coverage/width while retaining
+outliers and repeatability results.

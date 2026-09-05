@@ -43,10 +43,28 @@ def open_ready_lab(page):
     page.get_by_test_id("nutrition-lab").wait_for(state="visible", timeout=30_000)
 
 
-def run_live(db, cases, *, manifest, repeats, variants):
+class EstimatorMismatch(ValueError):
+    pass
+
+
+def check_estimator(job, expected_model=None, expected_version=None):
+    if ((expected_model and job.get("model") != expected_model) or
+            (expected_version and job.get("usage", {}).get("estimator_version") != expected_version)):
+        raise EstimatorMismatch("Deployed estimator differs from the requested frozen baseline")
+
+
+def run_live(db, cases, *, manifest, repeats, variants, expected_model=None, expected_version=None):
     from playwright.sync_api import sync_playwright
     from scripts.e2e_support import dev_resources, load_e2e_credentials, read_e2e_records, validate_e2e_credential, user_partition_items
     from macro_bot.serverless_data import _from_storage
+
+    # Validate the full plan before authentication or any paid calls.
+    if not cases or not variants or not 1 <= repeats <= 20:
+        raise ValueError("Invalid live evaluation plan")
+    for case in cases:
+        for variant in variants:
+            caption_for(case, variant)
+    print(f"Planned Lab calls: {len(cases) * len(variants) * repeats}", flush=True)
 
     session, table, outputs, repo = dev_resources()
     read_e2e_records(table)
@@ -61,15 +79,23 @@ def run_live(db, cases, *, manifest, repeats, variants):
     context_hash = digest(before)
     git_head = subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=DEFAULT_MANIFEST.parents[2], text=True).strip()
     batch_id = db.start_batch(transport="dev_browser_lab", context_hash=context_hash,
-        settings={"repeats": repeats, "variants": variants, "case_ids": [c["id"] for c in cases], "git_head": git_head})
+        settings={"repeats": repeats, "variants": variants, "case_ids": [c["id"] for c in cases], "git_head": git_head,
+                  "expected_model": expected_model, "expected_version": expected_version,
+                  "manifest_hash": digest(cases), "planned_calls": len(cases)*len(variants)*repeats,
+                  "domain_before_hash": context_hash, "domain_before_count": len(before),
+                  "benchmark_source_hashes": {name: digest((Path(__file__).parent / name).read_bytes()) for name in
+                      ("nutrition_accuracy.py", "nutrition_groundtruth.py", "nutrition_corpus.py", "nutrition_variance.py")},
+                  "estimator_source_sha256": digest((DEFAULT_MANIFEST.parents[2] / "macro_bot/direct_estimator.py").read_bytes())})
     failed = False
+    logout_verified = False
+    base_url = outputs["MiniAppUrl"].rstrip("/")
     try:
         with sync_playwright() as pw:
             browser = pw.chromium.launch(headless=os.getenv("JAVAAN_E2E_HEADLESS", "1") != "0")
+            context = None
             try:
                 context = browser.new_context(viewport={"width": 1280, "height": 900})
                 page = context.new_page()
-                base_url = outputs["MiniAppUrl"].rstrip("/")
                 page.goto(base_url + "/", wait_until="domcontentloaded", timeout=45_000)
                 page.get_by_test_id("browser-login-username").fill(username)
                 page.get_by_test_id("browser-login-password").fill(password)
@@ -96,26 +122,48 @@ def run_live(db, cases, *, manifest, repeats, variants):
                                 job_id = submitted.value.json()["job_id"]
                                 job = wait_lab_job(context.request, base_url, job_id)
                                 db.record(batch_id, case, variant, repeat, (time.monotonic()-started)*1000, job=job)
+                                check_estimator(job, expected_model, expected_version)
                                 print(f"{case['id']} {variant} {repeat}/{repeats}: complete", flush=True)
+                            except EstimatorMismatch:
+                                db.finish(batch_id, "invalid_estimator_version")
+                                raise
                             except Exception as err:
                                 failed = True
                                 db.record(batch_id, case, variant, repeat, (time.monotonic()-started)*1000, error_category=type(err).__name__)
                                 print(f"{case['id']} {variant} {repeat}/{repeats}: {type(err).__name__}", flush=True)
                                 page.reload(wait_until="domcontentloaded", timeout=45_000)
                                 open_ready_lab(page)
-                page.get_by_test_id("logout").click()
-                page.get_by_test_id("browser-login-form").wait_for(state="visible", timeout=30_000)
             finally:
-                browser.close()
-        if domain_snapshot() != before:
-            db.finish(batch_id, "invalid_context_domain_changed")
-            raise RuntimeError("Synthetic domain changed during the estimate-only batch; compare results only after reviewing context")
+                try:
+                    if context is not None:
+                        # Revoke the in-memory browser session even when a job fails.
+                        response = context.request.post(base_url + "/api/auth/logout", headers={"Origin": base_url}, timeout=30_000)
+                        state = context.request.get(base_url + "/api/auth/session", timeout=30_000)
+                        logout_verified = response.status == 200 and state.status == 200 and state.json().get("authenticated") is False
+                        if not logout_verified:
+                            raise RuntimeError("Browser logout could not be verified")
+                finally:
+                    browser.close()
         db.finish(batch_id, "complete_with_errors" if failed else "complete")
     except BaseException:
         current = db.report(batch_id)["status"]
         if current == "running":
             db.finish(batch_id, "interrupted")
         raise
+    finally:
+        # Runs after failures as well as success; no reset or domain writes.
+        try:
+            after = domain_snapshot()
+            unchanged = after == before
+            db.update_settings(batch_id, {"domain_after_hash": digest(after), "domain_after_count": len(after),
+                                          "domain_unchanged": unchanged, "logout_verified": logout_verified})
+            if not unchanged:
+                db.finish(batch_id, "invalid_context_domain_changed")
+                raise RuntimeError("Synthetic domain changed during estimate-only evaluation")
+        except Exception:
+            if db.report(batch_id)["status"] not in {"invalid_context_domain_changed"}:
+                db.finish(batch_id, "invalid_context_unverified")
+            raise
     return batch_id
 
 
@@ -143,6 +191,9 @@ def main(argv=None):
     parser.add_argument("--report", nargs="?", const="latest", help="show latest or specified historical batch")
     parser.add_argument("--output", type=Path, help="export a structured report to JSON")
     args = parser.parse_args(argv)
+    if args.output:
+        from scripts.nutrition_groundtruth import require_private_output
+        require_private_output(args.output)
     if not 2 <= args.repeats <= 20:
         parser.error("--repeats must be between 2 and 20")
     if args.live and args.report:

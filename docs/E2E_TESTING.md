@@ -323,3 +323,30 @@ calls and synthetic logs still run as `javaan-e2e`, never as the source account.
 Review each imported image and tag shared plates, occluded food, screenshots,
 product photos and alternate framing appropriately. Source captions and visual
 observations are not weighed nutrition labels. Do not publish private fixtures.
+
+### Ground-truth accuracy baseline (Phase 2.1)
+
+Use `make nutrition-groundtruth-check` for offline validation and
+`make nutrition-label CASE=<id>` for independent annotation. Select private data
+with `NUTRITION_MANIFEST=artifacts/nutrition/private/manifest.json`. See the
+[label contract and workflow](../evals/nutrition/README.md#enter-defensible-labels).
+
+`make nutrition-accuracy` only reads the saved report. Real calls require
+`scripts/nutrition_accuracy.py --live --case <id>`; case and variant selection is
+repeatable and repeats are bounded. Planned calls are printed before login.
+It reuses the deployed Lab browser upload/poll path in estimate-only mode.
+No deployment is needed for this tooling-only phase. Prompt, model, image
+preprocessing, correction math, priors and reconciliation remain unchanged.
+
+The runner pins `nutrition-estimator-v2 / gpt-5.4`, keeps per-run label snapshots,
+verifies logout even after failure, and records before/after hashes and counts
+for the entire synthetic user partition. It never resets the baseline. Invalid
+version/context batches cannot support accuracy reports. Offline isolation tests
+cover zero estimate writes; browser login/logout still manage session records.
+S3 deletion, job TTL, authentication gates and full-log flows remain unchanged.
+
+Reports separate Tier A macro errors, measured-gram portion errors, deterministic
+identity matching, range coverage/width, caption effects and repeatability.
+Tier B counts and Tier C identities never become macro truth. Private reports
+remain ignored. See the [baseline record](../evals/nutrition/ACCURACY_BASELINE.md)
+for results, unavailable dimensions, and constraints on the next calibration goal.

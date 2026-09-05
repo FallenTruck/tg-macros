@@ -1,10 +1,20 @@
-.PHONY: nutrition-corpus nutrition-variance e2e-nutrition-lab sync-runtime nutrition-eval deploy-miniapp e2e-install e2e-provision e2e-reset e2e-smoke e2e-screenshots
+.PHONY: nutrition-label nutrition-groundtruth-check nutrition-accuracy nutrition-corpus nutrition-variance e2e-nutrition-lab sync-runtime nutrition-eval deploy-miniapp e2e-install e2e-provision e2e-reset e2e-smoke e2e-screenshots
 
 RUNTIME_DIR = lambda_handlers/runtime
 AWS_PROFILE ?= fitness-dev
 AWS_REGION ?= ap-southeast-1
 STACK_NAME ?= tg-macros-dev
 E2E_PYTHON ?= .venv/bin/python
+NUTRITION_MANIFEST ?= evals/nutrition/manifest.json
+
+nutrition-label:
+	$(E2E_PYTHON) scripts/nutrition_label.py --manifest "$(NUTRITION_MANIFEST)" $(if $(CASE),--case "$(CASE)",) $(if $(LABEL),--input "$(LABEL)",)
+
+nutrition-groundtruth-check:
+	$(E2E_PYTHON) scripts/nutrition_label.py --check --manifest "$(NUTRITION_MANIFEST)"
+
+nutrition-accuracy:
+	$(E2E_PYTHON) scripts/nutrition_accuracy.py
 
 sync-runtime:
 	mkdir -p "$(RUNTIME_DIR)/macro_bot" lambda_handlers/webhook_runtime
