@@ -15,6 +15,7 @@ class RuntimeBundleTests(unittest.TestCase):
             "models.py",
             "profile_targets.py",
             "recommendations.py",
+            "recommendation_scenarios.py",
             "serverless_auth.py",
             "serverless_data.py",
             "serverless_service.py",

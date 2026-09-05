@@ -375,3 +375,36 @@ filtering, candidate-ID validation, Telegram formatting, delivery ordering,
 historical suppression, duplicate callbacks and failure isolation. The Lab's
 confirmed JSON now includes `nutrition_state_telegram_preview` separately from
 `recommendation_telegram_preview`; existing estimate previews remain unchanged.
+
+
+### Nutrition Profile V2 and retrospective logging
+
+Run `make profile-browser` offline before deployment. It exercises the actual
+Profile form and API through an isolated fake repository: both allowance choices,
+food/style preferences, a forbidden ingredient, bedtime, list validation,
+save/reload and target recalculation without wiping settings.
+
+After the full backend/frontend release and CloudFront invalidation, run
+`make e2e-profile` and then `make e2e-retrospective`, sequentially. The Profile
+runner resets the marked account before and after, verifies logout, and writes
+`artifacts/e2e/profile-live/profile-v2-mobile.png` and `profile-v2-desktop.png`.
+No credentials/cookies are captured or persisted.
+
+The retrospective runner calls the existing dev Lambda's separate IAM-only
+`retrospective_scenario` operation with one of five fixed scenario names. It
+accepts no user ID, timestamp, macro inputs or message destination. The Lambda
+revalidates the complete synthetic identity and uses production selected-datetime,
+pending-meal and confirmation operations with fixed synthetic macros. It makes
+four recommendation model calls; the historical case must skip ranking. It does
+not call the photo estimator or the Lab evaluation job path.
+
+Fixtures use a calendar date two days ahead with an injected current clock,
+avoiding the reset's current-day baseline meal in the historical case and
+preventing background expiry sweeps from treating fixture actions as expired.
+Earlier meals are confirmed at their actual time, then breakfast is entered at
+22:00. The previous-day case owns only its historical day. Resets occur before
+each case and in final cleanup, deleting only the validated synthetic partition.
+The account must not be used concurrently by another test. The report is
+`artifacts/e2e/retrospective-scenarios.json`. Assertions cover chronology, totals,
+confirmation metadata, qualified wording, moderate/light choices and a 22:45
+bedtime. No Telegram messages are sent.

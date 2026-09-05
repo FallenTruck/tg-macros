@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field, replace
 from datetime import datetime
+import re
 from typing import Dict, List, Optional
 
 QUESTIONNAIRE_VERSION = "miniapp-v2"
@@ -11,6 +12,7 @@ QUESTIONNAIRE_ACTIVITY_LEVELS = {"sedentary", "light", "moderate", "active", "ve
 ITEM_EVIDENCE_LEVELS = {"clearly_visible", "probably_visible", "partially_occluded", "inferred", "uncertain"}
 ASSUMPTION_KEYS = ("food_identity", "portion", "cooking_method", "oil_fat", "sauce_dressing", "hidden_ingredients")
 ESTIMATOR_VERSION = "nutrition-estimator-v2"
+RETROSPECTIVE_ENTRY_MINUTES = 120
 
 
 @dataclass(frozen=True)
@@ -465,6 +467,12 @@ class LoggedMealRow:
     fat_g: float
     confidence: float
     message_id: int
+    confirmed_at: Optional[str] = None
+
+    @property
+    def eaten_at(self) -> str:
+        """Actual meal time; datetime_iso is retained for CSV compatibility."""
+        return self.datetime_iso
 
     @classmethod
     def from_pending(cls, action: PendingMealAction, person: str) -> "LoggedMealRow":
@@ -510,6 +518,7 @@ class LoggedMealRow:
 
     @property
     def logged_at(self) -> datetime:
+        """Legacy CSV alias for actual eating time, never confirmation time."""
         return datetime.fromisoformat(self.datetime_iso)
 
     def to_csv_row(self) -> Dict[str, object]:
@@ -533,7 +542,7 @@ DIETARY_LIST_FIELDS = (
     "allergens", "forbidden_ingredients", "forbidden_foods", "preferred_meal_styles",
     "commonly_eaten_foods", "avoided_foods",
 )
-DIETARY_PROFILE_FIELDS = (*DIETARY_LIST_FIELDS, "diet_type", "eggs_allowed", "dairy_allowed", "variety_preference")
+DIETARY_PROFILE_FIELDS = (*DIETARY_LIST_FIELDS, "diet_type", "eggs_allowed", "dairy_allowed", "variety_preference", "recommendation_bedtime")
 
 
 @dataclass(frozen=True)
@@ -563,8 +572,11 @@ class UserProfile:
     commonly_eaten_foods: List[str] = field(default_factory=list)
     avoided_foods: List[str] = field(default_factory=list)
     variety_preference: str = "balanced"
+    recommendation_bedtime: str = "23:30"
 
     def __post_init__(self):
+        if not isinstance(self.recommendation_bedtime, str) or not re.fullmatch(r"(?:[01]\d|2[0-3]):[0-5]\d", self.recommendation_bedtime):
+            raise ValueError("recommendation_bedtime must be a local time in HH:MM format")
         if not isinstance(self.diet_type, str):
             raise ValueError("diet_type must be a string")
         diet = self.diet_type.strip().lower().replace("-", "_").replace(" ", "_")
@@ -924,7 +936,7 @@ class RecommendationResult:
     remaining_macros: MacroTotal
     suggestions: List[RecommendedMeal]
     source: str
-    strategy_version: str = "nutrition-recommendation-v3"
+    strategy_version: str = "nutrition-recommendation-v4"
 
     @classmethod
     def from_payload(cls, payload: Dict[str, object]) -> "RecommendationResult":

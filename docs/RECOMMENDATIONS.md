@@ -1,4 +1,4 @@
-# Nutrition Phase 2.3 recommendations
+# Nutrition recommendations and Profile V2
 
 ## Production sequence
 
@@ -33,11 +33,17 @@ contents or SDK exception text. Receipt/old-message failures have separate event
 
 ## Local timing and occasion
 
-Version: `nutrition-recommendation-v3`. Bedtime is **23:30 in the saved profile
-timezone**. A clock can be injected in tests; production uses the service clock.
+Version: `nutrition-recommendation-v4`. Bedtime is the saved profile
+`recommendation_bedtime`, defaulting to **23:30**, in its saved timezone. It is a
+validated local `HH:MM` wall-clock value, never a UTC instant. A clock can be
+injected in tests; production uses the service clock.
 Minutes are floored, and exactly 180/90/45/15 minutes enter the stricter band.
-At/after bedtime, minutes remain nonpositive; 00:00–04:59 uses the preceding
-night's bedtime rather than treating midnight as a fresh full-meal window.
+At/after bedtime, minutes remain nonpositive. A sleep night starts at 05:00:
+00:00–04:59 uses the preceding night's target for evening bedtimes. A bedtime
+before 05:00 belongs to the next calendar date when now is 05:00 or later.
+Thus at 22:00, a 00:30 bedtime is 150 minutes away; at 00:10 it is 20 minutes
+away; at 01:00 it is 30 minutes past. Subtraction uses UTC instants after local
+date/time composition, so elapsed minutes account for timezone offsets.
 Daily macro accounting still uses the existing local calendar-day boundary.
 
 | Minutes until bedtime | Band | Default approach |
@@ -60,6 +66,60 @@ Plausible remaining occasions are one within 180 minutes, otherwise
 The request includes current local datetime, dated bedtime, minutes, band,
 occasion/count, last meal time, today's meal count, up to six recent confirmed
 meal summaries with local timestamps/macros, totals, remaining macros and preferences.
+
+## Actual meal time and retrospective entries
+
+`eaten_at` owns the nutrition date, timeline order, recent meal chronology and
+latest-meal logic. `/logmeal` normalizes the selected local date/time to a UTC
+instant and keeps it through confirmation. `confirmed_at` is written atomically
+with confirmation, including expiry auto-confirmation, and stays unchanged on
+retries. It is only an operational timestamp. `created_at`/`updated_at` never
+substitute for it. Legacy meals without `confirmed_at` keep an unknown delay;
+there is no migration or guess from their last update.
+
+The repository explicitly sorts by actual `eaten_at`, and the planner sorts again
+before constructing bounded meal facts (last six facts in ascending order).
+The legacy `LoggedMealRow.datetime_iso` and `logged_at` aliases still mean actual
+eating time for CSV compatibility; runtime rows additionally carry `confirmed_at`.
+
+`entry_delay_minutes = max(0, floor((confirmed_at - eaten_at) / 60 seconds))`.
+A delay of **at least 120 minutes** marks a retrospective entry. Message 1 includes
+the local time for such entries, and the date for historical entries. Normal
+current-time confirmations retain `✅ Meal logged`. Daily totals always come from
+all persisted confirmed meals on the date of `eaten_at`.
+
+Same-day backfills may recommend against today's recomputed totals, using **now**
+for timing. A breakfast entered at 22:00 remains before the 13:00 lunch and 19:15
+dinner; dinner stays the most recent meal. Previous-local-day logs update only
+the historical day and suppress Message 2, including the worker's existing
+current-date recheck.
+
+## Possible incomplete logging
+
+This is uncertainty metadata, not a claim that meals were missed. The deterministic
+signal is true only when all of these hold:
+
+- Current local time is at/after 20:00 or before 05:00.
+- A same-day meal with delay >=120 minutes was confirmed in the last 120 minutes.
+- The latest actual meal is at least 240 minutes ago.
+- At most two meals have been recorded, or that latest-meal gap is >=360 minutes.
+
+Future meal times are excluded from latest-meal/count logic. Legacy missing
+confirmation times cannot establish a recent backfill. A recent dinner therefore
+prevents an old breakfast backfill from implying an incomplete day.
+
+For `possible_incomplete_day`, desired next-meal macros are capped at 350 kcal,
+35g protein, 40g carbs and 12g fat before closeness scoring. Full meals receive
+-25, >=600 kcal options another -25, and light/snack/top-up options with >=20g
+protein, <=450 kcal and <=12g fat get +12. Existing bedtime scores and all hard
+food filters still apply. The strongest deterministic choice remains first after
+model ranking; the model may rank only eligible candidates.
+
+The deterministic summary says “Based on what you've logged today…” and qualifies
+protein gaps with “If today's log is complete…”. Model option prose is replaced
+with deterministic reasons/tradeoffs in uncertain cases, so unqualified pressure
+to fill the entire target cannot reappear through a model explanation. Normal
+skip rules still apply; uncertainty alone does not suppress useful suggestions.
 
 ## Catalogue and restrictions
 
@@ -94,9 +154,17 @@ separate sets of rules:
 The authenticated profile API reads/saves these fields and preserves omitted
 fields during ordinary questionnaire/target updates. Arrays accept up to 32
 nonempty strings of at most 100 characters; allowances require actual JSON
-booleans/null, never truthy strings. No new frontend form controls are part of
-this backend change. File-backed profiles and identity migration retain the same
-fields. No real-user diet values are changed by deployment.
+booleans/null, never truthy strings. Profile now exposes diet, egg/dairy allowances,
+restrictions, preferences, variety and bedtime. List fields accept commas or
+new lines, with matching client and server limits. Existing additional diet rules
+remain editable when present. Style editing combines saved legacy tags and meal
+styles into one control. Unchanged controls are omitted from saves.
+
+Settings-only `POST /api/profile` updates preserve the questionnaire/target and do
+not append a target revision. Questionnaire updates preserve omitted settings.
+Identity always comes from authentication, never a body user ID. Profiles without
+a target must complete target setup first. File-backed profiles and identity
+migration retain the same fields. No real-user diet values are migrated by deployment.
 
 An empty `diet_type` uses the legacy saved vegetarian/vegan flags. An explicit
 diet type takes precedence over legacy preference labels; restriction flags still
@@ -202,7 +270,18 @@ IDs/types and unchanged domain state, then restores the baseline. See
 full logging, correction, confirmation/recommendation and cancellation.
 
 These are heuristic rankings, not meal scheduling, digestion predictions or
-clinical recommendations. Timing is a fixed bedtime policy, hunger/availability
+clinical recommendations. Timing uses a saved bedtime with a fixed 05:00 night
+boundary. Completeness is only a conservative heuristic; hunger/availability
 is not observed live, repeat matching uses caption tokens, and catalogue macros
 are approximate. Recommendations are best effort; the persisted meal remains
 authoritative regardless of delivery or model availability.
+
+
+Profile V2 adds `make profile-browser`, `make e2e-profile` and
+`make e2e-retrospective`. The first uses Chromium against the real API with an
+isolated fake repository. The live Profile flow uses only `javaan-e2e`, checks
+save/reload/target recalculation and captures mobile/desktop screenshots. The
+retrospective runner resets the marked synthetic partition before each of five
+fixed IAM-only scenarios and afterward. The scenarios cover current logging,
+breakfast after lunch/dinner, incomplete breakfast backfill, previous-day logging,
+and custom bedtime. See [E2E_TESTING.md](E2E_TESTING.md) for isolation details.

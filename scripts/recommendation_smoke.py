@@ -40,7 +40,7 @@ def main():
         scenarios = result['scenarios']
         assert len(scenarios) == 2
         for scenario in scenarios:
-            assert scenario['strategy_version'] == 'nutrition-recommendation-v3'
+            assert scenario['strategy_version'] == 'nutrition-recommendation-v4'
             assert scenario['source'] in {'model_ranked', 'deterministic_fallback'}
             assert scenario['suggestions']
             assert scenario['preview'].startswith('🥗 What to eat next')

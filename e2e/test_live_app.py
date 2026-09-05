@@ -35,6 +35,7 @@ class LiveJavaanFitnessE2ETests(unittest.TestCase):
         read_e2e_records(_table)
         validate_e2e_credential(_repository.get_web_credential("javaan-e2e"))
         cls.table = _table
+        cls.repository = _repository
         cls.base_url = outputs["MiniAppUrl"].rstrip("/")
         cls.username, cls.password = load_e2e_credentials(session)
 
@@ -292,6 +293,26 @@ class LiveJavaanFitnessE2ETests(unittest.TestCase):
             browser.close()
             playwright.stop()
 
+    def test_live_profile_settings(self):
+        from scripts.reset_e2e_account import reset_e2e_account
+        from e2e.profile_flow import exercise_profile_settings
+        reset_e2e_account(table=self.table, repository=self.repository)
+        playwright, browser = self._new_browser()
+        try:
+            context = browser.new_context(viewport={"width": 390, "height": 844})
+            try:
+                page = self._open_page(context)
+                self._login(page)
+                exercise_profile_settings(page, "artifacts/e2e/profile-live")
+            finally:
+                response = context.request.post(self.base_url + "/api/auth/logout", headers={"Origin": self.base_url})
+                self.assertEqual(response.status, 200)
+                self.assertFalse(context.request.get(self.base_url + "/api/auth/session").json()["authenticated"])
+        finally:
+            browser.close()
+            playwright.stop()
+            reset_e2e_account(table=self.table, repository=self.repository)
+
     def test_live_nutrition_lab(self):
         """Real image + real OpenAI, with no numeric accuracy claims."""
         from scripts.nutrition_corpus import case_by_id, image_path
@@ -396,7 +417,7 @@ class LiveJavaanFitnessE2ETests(unittest.TestCase):
             self.assertIn("Remaining", state_preview)
             self.assertNotIn("What to eat next", state_preview)
             if confirmed["recommendation_status"] == "complete":
-                self.assertEqual(confirmed["recommendation"]["strategy_version"], "nutrition-recommendation-v3")
+                self.assertEqual(confirmed["recommendation"]["strategy_version"], "nutrition-recommendation-v4")
                 if confirmed["recommendation"]["source"] == "skipped":
                     self.assertEqual(confirmed["recommendation_telegram_preview"], "")
                 else:

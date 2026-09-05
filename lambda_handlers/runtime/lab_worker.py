@@ -19,5 +19,8 @@ def handler(event, context):
     if event == {"operation": "recommendation_scenarios"}:
         # IAM-invoked dev smoke only. No HTTP route, clock input or Telegram destination.
         return asyncio.run(lab.recommendation_scenarios())
+    if set(event) == {"operation", "scenario"} and event.get("operation") == "retrospective_scenario":
+        from macro_bot.recommendation_scenarios import run_scenario
+        return asyncio.run(run_scenario(service, event["scenario"]))
     asyncio.run(lab.process(event.get("job_id", ""), event.get("operation", "")))
     return {"processed": True}

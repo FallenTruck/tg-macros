@@ -6,7 +6,7 @@ from pathlib import Path
 
 from macro_bot.models import MacroTotal, QuestionnaireAnswers, UserProfile
 from macro_bot.serverless_data import DynamoNutritionRepository
-from macro_bot.serverless_service import NutritionService, ReadOnlyFoodCatalogStore
+from macro_bot.serverless_service import NutritionService, ReadOnlyFoodCatalogStore, InvalidUserInput
 from tests.test_serverless_data import _FakeTable, _estimate
 
 
@@ -79,14 +79,17 @@ class ServerlessServiceTests(unittest.TestCase):
         after = hashlib.sha256(Path("food_catalog.json").read_bytes()).hexdigest()
         self.assertEqual(before, after)
 
-    def test_service_preview_ignores_client_identity_and_preserves_target_history(self):
+    def test_profile_rejects_client_identity_while_preview_and_target_history_remain_safe(self):
         identity = self.service.resolve_user(101, "a", "A")
         payload = {
             "telegram_user_id": 999999,
             "internal_user_id": "someone-else",
             **self.answers.to_payload(),
         }
-        result = self.service.save_profile(identity, payload)
+        with self.assertRaises(InvalidUserInput):
+            self.service.save_profile(identity, payload)
+        self.assertEqual(len(self.repo.list_targets(identity.user_id)), 0)
+        result = self.service.save_profile(identity, self.answers.to_payload())
         self.assertEqual(result["viewer"]["telegram_user_id"], 101)
         self.assertEqual(len(self.repo.list_targets(identity.user_id)), 1)
         preview = NutritionService.preview_payload(payload)

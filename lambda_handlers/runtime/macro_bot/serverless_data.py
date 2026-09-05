@@ -116,10 +116,17 @@ class StoredMeal:
     message_id: Optional[int]
     created_at: str
     updated_at: str
+    confirmed_at: Optional[str] = None  # Unknown for legacy rows; never infer from updated_at.
 
     @property
     def macros(self) -> MacroTotal:
         return (self.final_estimate or self.original_estimate).total_best
+
+    @property
+    def entry_delay_minutes(self) -> Optional[int]:
+        if not self.confirmed_at:
+            return None
+        return max(0, int((parse_utc(self.confirmed_at) - parse_utc(self.eaten_at)).total_seconds() // 60))
 
 
 @dataclass(frozen=True)
@@ -730,6 +737,7 @@ class DynamoNutritionRepository:
         *,
         effective_at: Optional[datetime] = None,
         source: str = "miniapp",
+        append_target: bool = True,
     ) -> dict[str, Any]:
         now = utc_iso(self._now())
         created_at = profile.created_at or now
@@ -765,17 +773,11 @@ class DynamoNutritionRepository:
             "created_at": created_at,
             "updated_at": now,
         }
-        self._transact_write(
-            [
-                {"operation": "Put", "TableName": self.table_name, "Item": profile_item},
-                {
-                    "operation": "Put",
-                    "TableName": self.table_name,
-                    "Item": target_item,
-                    "ConditionExpression": "attribute_not_exists(PK)",
-                },
-            ]
-        )
+        operations = [{"operation": "Put", "TableName": self.table_name, "Item": profile_item}]
+        if append_target:
+            operations.append({"operation": "Put", "TableName": self.table_name, "Item": target_item,
+                               "ConditionExpression": "attribute_not_exists(PK)"})
+        self._transact_write(operations)
         return {"target_id": target_id, "effective_at": effective_iso, "profile": profile}
 
     def list_targets(self, user_id: str) -> list[dict[str, Any]]:
@@ -1262,7 +1264,7 @@ class DynamoNutritionRepository:
         }
         meal_expression = "SET #status = :new_status, adjustment_factor = :factor, updated_at = :updated"
         if final_payload is not None:
-            meal_expression += ", final_estimate = :final_estimate, final_macros = :final_macros"
+            meal_expression += ", final_estimate = :final_estimate, final_macros = :final_macros, confirmed_at = :updated"
             meal_values[":final_estimate"] = final_payload
             meal_values[":final_macros"] = action.estimate.total_best.to_payload()
         meal_update = {
@@ -1329,7 +1331,7 @@ class DynamoNutritionRepository:
             "UpdateExpression": (
                 "SET #status = :confirmed, adjustment_factor = :factor, "
                 "final_estimate = :final_estimate, final_macros = :final_macros, "
-                "updated_at = :updated"
+                "updated_at = :updated, confirmed_at = :updated"
             ),
             "ConditionExpression": "#status = :pending",
             "ExpressionAttributeNames": {"#status": "status"},
@@ -1416,7 +1418,7 @@ class DynamoNutritionRepository:
         meals = [_meal_from_item(item) for item in items]
         if confirmed_only:
             meals = [meal for meal in meals if meal.status == "confirmed"]
-        return meals
+        return sorted(meals, key=lambda meal: (parse_utc(meal.eaten_at), meal.meal_id))
 
     def list_recent_meals(self, identity: ServerlessIdentity, limit: int = 6) -> list[StoredMeal]:
         items = self._query(
@@ -1426,7 +1428,7 @@ class DynamoNutritionRepository:
             FilterExpression=Attr("status").eq("confirmed"),
         )
         meals = [_meal_from_item(item) for item in items]
-        return list(reversed(meals))
+        return sorted(meals, key=lambda meal: (parse_utc(meal.eaten_at), meal.meal_id))
 
     def daily_summary(self, identity: ServerlessIdentity, target_date: date, timezone_name: str = DEFAULT_TIMEZONE) -> DailyMacroSummary:
         start_iso, end_iso = local_day_utc_bounds(target_date, timezone_name)
@@ -1538,6 +1540,7 @@ def _meal_from_item(item: Mapping[str, Any]) -> StoredMeal:
         message_id=int(plain["message_id"]) if plain.get("message_id") is not None else None,
         created_at=str(plain.get("created_at", "")),
         updated_at=str(plain.get("updated_at", "")),
+        confirmed_at=str(plain["confirmed_at"]) if plain.get("confirmed_at") else None,
     )
 
 
@@ -1555,6 +1558,7 @@ def _logged_row(meal: StoredMeal) -> LoggedMealRow:
         fat_g=round(macros.fat_g, 1),
         confidence=round(float((meal.final_estimate or meal.original_estimate).confidence), 3),
         message_id=meal.message_id or 0,
+        confirmed_at=meal.confirmed_at,
     )
 
 

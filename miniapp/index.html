@@ -196,7 +196,7 @@
               <div class="identity-copy">
                 <p class="section-label">Profile</p>
                 <h2 id="profile-viewer-title">@username</h2>
-                <p id="profile-viewer-subtitle">Manage your saved target here.</p>
+                <p id="profile-viewer-subtitle">Manage your nutrition targets and food settings.</p>
               </div>
             </div>
 
@@ -216,6 +216,48 @@
             <a href="#questionnaire" class="primary summary-cta action-link" id="profile-edit-button">
               Set Up Targets
             </a>
+          </section>
+          <section class="panel nutrition-settings" id="nutrition-settings-panel">
+            <div class="panel-head"><div><p class="section-label">Nutrition Profile</p><h2>Food & recommendations</h2></div></div>
+            <p id="settings-setup-note">Save a nutrition target to configure your food rules and recommendations.</p>
+            <form id="nutrition-settings-form" hidden>
+              <fieldset class="settings-section">
+                <legend>Your diet</legend>
+                <p class="settings-help">Your diet and restrictions apply to every recommendation. Vegan rules and explicit restrictions always take priority.</p>
+                <div class="settings-grid">
+                  <div class="field-group"><label for="setting-diet_type">Diet type</label><select id="setting-diet_type" name="diet_type"><option value="">Use saved diet rules</option><option value="non_vegetarian">Non-vegetarian</option><option value="vegetarian">Vegetarian</option><option value="vegan">Vegan</option></select></div>
+                  <div class="field-group"><label for="setting-eggs_allowed">Eggs</label><select id="setting-eggs_allowed" name="eggs_allowed"><option value="">Use diet default</option><option value="true">Allowed</option><option value="false">Avoid</option></select></div>
+                  <div class="field-group"><label for="setting-dairy_allowed">Dairy</label><select id="setting-dairy_allowed" name="dairy_allowed"><option value="">Use diet default</option><option value="true">Allowed</option><option value="false">Avoid</option></select></div>
+                </div>
+              </fieldset>
+              <fieldset class="settings-section settings-restrictions">
+                <legend>Restrictions</legend>
+                <p class="settings-help">Foods JavaanFitness must never recommend. Separate entries with commas or new lines, up to 32 per field.</p>
+                <div class="settings-grid"><div class="field-group"><label for="setting-allergens">Allergens</label><textarea id="setting-allergens" name="allergens" rows="2" placeholder="e.g. milk, peanuts" maxlength="3232"></textarea></div>
+<div class="field-group"><label for="setting-forbidden_ingredients">Forbidden ingredients</label><textarea id="setting-forbidden_ingredients" name="forbidden_ingredients" rows="2" placeholder="e.g. garlic, egg" maxlength="3232"></textarea></div>
+<div class="field-group"><label for="setting-forbidden_foods">Forbidden foods</label><textarea id="setting-forbidden_foods" name="forbidden_foods" rows="2" placeholder="Exact meal names, e.g. Egg and Toast Plate" maxlength="3232"></textarea></div>
+<div class="field-group"><label for="setting-restrictions">Existing restrictions</label><textarea id="setting-restrictions" name="restrictions" rows="2" placeholder="e.g. dairy_free, no_shellfish" maxlength="3232"></textarea></div></div>
+                <p class="settings-help">Forbidden foods match exact meal names. Use forbidden ingredients to exclude an ingredient from every dish. Foods with insufficient ingredient information may be excluded.</p>
+                <div id="settings-legacy-rules" hidden><div class="field-group"><label for="setting-dietary_preferences">Additional saved diet rules</label><textarea id="setting-dietary_preferences" name="dietary_preferences" rows="2" placeholder="Your existing dietary rules" maxlength="3232"></textarea></div></div>
+              </fieldset>
+              <fieldset class="settings-section">
+                <legend>Preferences</legend>
+                <p class="settings-help">Foods and styles JavaanFitness should prefer when suitable. Usually avoided foods remain eligible. Separate entries with commas or new lines.</p>
+                <div class="settings-grid"><div class="field-group"><label for="setting-preferred_cuisines">Preferred cuisines</label><textarea id="setting-preferred_cuisines" name="preferred_cuisines" rows="2" placeholder="e.g. Indian, Asian" maxlength="3232"></textarea></div>
+<div class="field-group"><label for="setting-preferred_staples">Preferred staples</label><textarea id="setting-preferred_staples" name="preferred_staples" rows="2" placeholder="e.g. dal, rice, chapati" maxlength="3232"></textarea></div>
+<div class="field-group"><label for="setting-preferred_meal_styles">Preferred meal styles</label><textarea id="setting-preferred_meal_styles" name="preferred_meal_styles" rows="2" placeholder="e.g. light, high protein, home" maxlength="3232"></textarea></div>
+<div class="field-group"><label for="setting-commonly_eaten_foods">Commonly eaten foods</label><textarea id="setting-commonly_eaten_foods" name="commonly_eaten_foods" rows="2" placeholder="e.g. tofu, lentils" maxlength="3232"></textarea></div>
+<div class="field-group"><label for="setting-avoided_foods">Foods usually avoided</label><textarea id="setting-avoided_foods" name="avoided_foods" rows="2" placeholder="e.g. paneer" maxlength="3232"></textarea></div>
+                  <div class="field-group"><label for="setting-variety_preference">Variety</label><select id="setting-variety_preference" name="variety_preference"><option value="low">Low · familiar meals</option><option value="balanced">Balanced</option><option value="high">High · more variety</option></select></div>
+                </div>
+              </fieldset>
+              <fieldset class="settings-section">
+                <legend>Recommendation timing</legend>
+                <div class="field-group bedtime-field"><label for="setting-recommendation_bedtime">Target bedtime</label><input id="setting-recommendation_bedtime" name="recommendation_bedtime" type="time" value="23:30" required step="60" /></div>
+                <p class="settings-help" id="settings-timezone">Local time in your saved timezone. Default: 23:30.</p>
+              </fieldset>
+              <div class="settings-save"><button class="primary" id="save-nutrition-settings" type="submit">Save food settings</button><p id="nutrition-settings-status" role="status" aria-live="polite"></p></div>
+            </form>
           </section>
         </section>
 

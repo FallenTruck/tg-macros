@@ -10,7 +10,7 @@ from pathlib import Path
 from typing import Any, Dict, Mapping, Optional
 from zoneinfo import ZoneInfo
 
-from .models import DIETARY_PROFILE_FIELDS, MacroTotal, QuestionnaireAnswers, RemainingMacros, UserProfile
+from .models import DIETARY_PROFILE_FIELDS, RETROSPECTIVE_ENTRY_MINUTES, MacroTotal, QuestionnaireAnswers, RemainingMacros, UserProfile
 from .profile_targets import (
     ACTIVITY_LEVEL_OPTIONS,
     GOAL_OPTIONS,
@@ -188,11 +188,26 @@ class NutritionService:
         }
 
     def save_profile(self, identity: ServerlessIdentity, payload: dict[str, Any]) -> dict[str, Any]:
+        from dataclasses import replace
+        if {"user_id", "internal_user_id", "telegram_user_id"}.intersection(payload):
+            raise InvalidUserInput("Profile identity comes from your signed-in account")
+        existing = self.repository.get_profile(identity.user_id)
+        questionnaire_keys = {"sex", "age_years", "height_cm", "weight_kg", "activity_level", "goal"}
+        if not questionnaire_keys.intersection(payload):
+            if existing is None:
+                raise InvalidUserInput("Set up your nutrition target before saving recommendation settings")
+            if not set(DIETARY_PROFILE_FIELDS).intersection(payload):
+                raise InvalidUserInput("No recommendation settings supplied")
+            try:
+                profile = replace(existing, **{key: payload[key] for key in DIETARY_PROFILE_FIELDS if key in payload})
+            except (TypeError, ValueError) as err:
+                raise InvalidUserInput(str(err)) from err
+            self.repository.save_profile(identity, profile, append_target=False)
+            return self.profile_response(identity)
         try:
             answers = QuestionnaireAnswers.from_payload(payload)
         except (TypeError, ValueError) as err:
             raise InvalidUserInput(str(err)) from err
-        existing = self.repository.get_profile(identity.user_id)
         timezone_name = str(payload.get("timezone") or (existing.timezone if existing else DEFAULT_TIMEZONE))
         try:
             ZoneInfo(timezone_name)
@@ -437,6 +452,10 @@ class NutritionService:
                 profile.daily_target, MacroTotal.from_payload(payload["consumed"])
             ).remaining.to_payload()
         payload["this_meal"] = meal.macros.to_payload()
+        payload["eaten_at_local"] = parse_utc(meal.eaten_at).astimezone(zone).isoformat()
+        payload["confirmed_at"] = meal.confirmed_at
+        payload["entry_delay_minutes"] = meal.entry_delay_minutes
+        payload["retrospective"] = meal.entry_delay_minutes is not None and meal.entry_delay_minutes >= RETROSPECTIVE_ENTRY_MINUTES
         return payload
 
     def nutrition_message_sent(self, identity: ServerlessIdentity, token: str) -> bool:
@@ -494,6 +513,8 @@ def _meal_payload(meal: StoredMeal) -> dict[str, Any]:
     return {
         "meal_id": meal.meal_id,
         "eaten_at": meal.eaten_at,
+        "confirmed_at": meal.confirmed_at,
+        "entry_delay_minutes": meal.entry_delay_minutes,
         "caption": meal.caption,
         "status": meal.status,
         "adjustment_factor": round(meal.adjustment_factor, 4),

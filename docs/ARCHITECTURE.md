@@ -265,10 +265,18 @@ four-part deployment gate, identity proof, image cleanup, and live checks.
 The worker now sends a persisted-state nutrition message before preparing any
 recommendation. Confirmed daily totals are rebuilt using strongly consistent
 meal reads, and the action stores a first-message receipt. A separate best-effort
-recommendation uses profile-local time and the 23:30 bedtime policy, explicit
+recommendation uses current profile-local time and the saved bedtime (23:30 by default), explicit
 catalogue meal types and deterministic scoring before bounded model ranking.
 Historical dates and non-useful suggestions are suppressed; recommendation
 errors cannot undo confirmation or trigger a confirmation retry. Scheduled
 expiry uses the same messages with deterministic fallback to avoid serial model
 latency. See [RECOMMENDATIONS.md](RECOMMENDATIONS.md) for exact policy, scores,
 delivery semantics and test coverage.
+
+
+Nutrition Profile V2 keeps recommendation settings in the existing profile.
+Settings-only saves do not append target revisions. Confirmed meals explicitly
+record `confirmed_at` while `eaten_at` continues to own dates and ordering.
+Retrospective logging never substitutes the entered meal time for the current
+recommendation clock. See RECOMMENDATIONS.md for completeness moderation and the
+05:00 sleep-night boundary used for custom bedtimes.

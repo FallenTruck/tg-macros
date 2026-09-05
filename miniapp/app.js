@@ -42,6 +42,40 @@ const state = {
 };
 
 const form = document.querySelector("#questionnaire-form");
+const settingsForm = document.querySelector("#nutrition-settings-form");
+const settingsStatus = document.querySelector("#nutrition-settings-status");
+const settingsSave = document.querySelector("#save-nutrition-settings");
+const settingsLists = ["allergens", "forbidden_ingredients", "forbidden_foods", "restrictions", "dietary_preferences", "preferred_cuisines", "preferred_staples", "preferred_meal_styles", "commonly_eaten_foods", "avoided_foods"];
+const settingsFields = [...settingsLists, "diet_type", "eggs_allowed", "dairy_allowed", "variety_preference", "recommendation_bedtime"];
+let settingsInitial = {};
+
+settingsForm.addEventListener("input", () => {
+  settingsStatus.textContent = "Unsaved food settings";
+  settingsStatus.dataset.tone = "neutral";
+});
+settingsForm.addEventListener("submit", async (event) => {
+  event.preventDefault();
+  if (!state.hasAuth || !state.profile || settingsSave.disabled) return;
+  try {
+    const payload = collectNutritionSettings();
+    if (!Object.keys(payload).length) {
+      settingsStatus.textContent = "Food settings are up to date.";
+      settingsStatus.dataset.tone = "neutral";
+      return;
+    }
+    settingsSave.disabled = true;
+    const response = await apiFetch("/api/profile", {method: "POST", body: JSON.stringify(payload)});
+    state.profile = response.profile;
+    renderProfileSummary();
+    settingsStatus.textContent = "Food settings saved.";
+    settingsStatus.dataset.tone = "success";
+  } catch (error) {
+    settingsStatus.textContent = error.message || "Could not save food settings.";
+    settingsStatus.dataset.tone = "error";
+  } finally {
+    settingsSave.disabled = false;
+  }
+});
 const statusPanel = document.querySelector("#status-panel");
 const statusMessage = document.querySelector("#status-message");
 const activityOptionsEl = document.querySelector("#activity-options");
@@ -1150,6 +1184,7 @@ function renderHomeSummary() {
 }
 
 function renderProfileSummary() {
+  renderNutritionSettings();
   if (!state.profile) {
     profileSummaryTitle.textContent = "No target saved yet";
     profileMeta.textContent = "Complete the questionnaire to create one.";
@@ -1654,4 +1689,52 @@ async function mutateLabJob(operation, payload = {}) {
     try { renderLabJob(await apiFetch(`${labApi}/${jobId}`)); } catch (_error) { /* reload can recover */ }
     labStatus(error.message + " Review the current result before trying again.");
   }
+}
+
+function renderNutritionSettings() {
+  const profile = state.profile;
+  settingsForm.hidden = !profile;
+  document.querySelector("#settings-setup-note").hidden = Boolean(profile);
+  if (!profile) return;
+  const styles = [...new Set([...(profile.preferred_meal_styles || []), ...(profile.preferred_tags || [])])];
+  settingsInitial = {};
+  for (const key of settingsFields) {
+    let value = profile[key];
+    if (key === "preferred_meal_styles") value = styles;
+    if (settingsLists.includes(key)) value = (value || []).join(", ");
+    else if (key === "recommendation_bedtime") value = value || "23:30";
+    else if (key === "variety_preference") value = value || "balanced";
+    else value = value == null ? "" : String(value);
+    settingsForm.elements.namedItem(key).value = value;
+    settingsInitial[key] = value;
+  }
+  document.querySelector("#settings-legacy-rules").hidden = !(profile.dietary_preferences || []).length;
+  document.querySelector("#settings-timezone").textContent = `Local time in ${profile.timezone || "Asia/Singapore"}. Default: 23:30. Bedtimes after midnight are supported.`;
+}
+
+function collectNutritionSettings() {
+  const payload = {};
+  for (const key of settingsFields) {
+    const field = settingsForm.elements.namedItem(key);
+    const value = field.value;
+    if (value === settingsInitial[key]) continue;
+    if (settingsLists.includes(key)) {
+      const entries = [...new Set(value.split(/[,\n]/).map(item => item.trim()).filter(Boolean))];
+      if (entries.length > 32 || entries.some(item => item.length > 100)) {
+        field.focus();
+        throw new Error(`${field.labels[0].textContent}: use up to 32 entries, each at most 100 characters.`);
+      }
+      payload[key] = entries;
+      if (key === "preferred_meal_styles") payload.preferred_tags = [];
+    } else if (key === "eggs_allowed" || key === "dairy_allowed") {
+      payload[key] = value === "" ? null : value === "true";
+    } else {
+      if (key === "recommendation_bedtime" && !/^(?:[01]\d|2[0-3]):[0-5]\d$/.test(value)) {
+        field.focus();
+        throw new Error("Enter a bedtime in HH:MM format.");
+      }
+      payload[key] = value;
+    }
+  }
+  return payload;
 }

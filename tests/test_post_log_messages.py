@@ -130,6 +130,22 @@ class PostLogTests(unittest.IsolatedAsyncioTestCase):
         self.assertNotIn('\nToday\n', self.bot.sent[0]['text'])
         self.service.recommendation_async.assert_not_called()
 
+    async def test_same_day_breakfast_backfill_message_and_current_time_recommendation(self):
+        self.now = self.now.replace(hour=14, minute=0)  # 22:00 Singapore
+        self.action = self.pending(420, 24, 46, 15, eaten_at=self.now.replace(hour=0, minute=30))
+        captured = []
+        real = self.service.recommendation_async
+        async def recommend(identity):
+            result, prepared = await real(identity)
+            captured.append(prepared)
+            return result, prepared
+        self.service.recommendation_async = recommend
+        await self.confirm()
+        self.assertTrue(self.bot.sent[0]['text'].startswith('✅ Meal logged for 8:30 AM'))
+        self.assertEqual(captured[0].timing.local_datetime[11:16], '22:00')
+        self.assertEqual(captured[0].timing.most_recent_meal_time[11:16], '18:30')
+        self.assertEqual(self.repo.get_meal(self.identity, self.action.meal_id).entry_delay_minutes, 810)
+
     async def test_auto_confirm_sweep_uses_same_state_and_fast_fallback(self):
         self.now += timedelta(hours=2)
         finalized = self.repo.auto_confirm_expired_action(self.identity, self.action.token)
@@ -137,7 +153,8 @@ class PostLogTests(unittest.IsolatedAsyncioTestCase):
             count = await worker._expire_meal_actions()
         self.assertEqual(count, 1)
         self.assertEqual(len(self.bot.sent), 2)
-        self.assertIn('logged automatically after timeout', self.bot.sent[0]['text'])
+        self.assertIn('Meal logged for 6:30 PM', self.bot.sent[0]['text'])
+        self.assertIn('automatically after timeout', self.bot.sent[0]['text'])
         self.assertTrue(self.bot.sent[1]['text'].startswith('🥗'))
 
     async def test_message_lengths_with_long_model_explanations(self):

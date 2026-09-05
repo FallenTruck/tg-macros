@@ -137,6 +137,12 @@ def format_nutrition_state_message(state: dict, *, automatic: bool = False) -> s
     meal, consumed = state["this_meal"], state["consumed"]
     target, remaining = state.get("target"), state.get("remaining")
     title = "✅ Meal logged automatically after timeout" if automatic else "✅ Meal logged"
+    if state.get("retrospective") and state.get("eaten_at_local"):
+        eaten = datetime.fromisoformat(state["eaten_at_local"])
+        meal_time = eaten.strftime("%I:%M %p").lstrip("0")
+        if state["date"] != state["today"]:
+            meal_time = f"{state['date']} at {meal_time}"
+        title = f"✅ Meal logged for {meal_time}" + (" (automatically after timeout)" if automatic else "")
     day = "Today" if state["date"] == state["today"] else f"Logged day · {state['date']}"
     lines = [title, "", "This meal", f"{meal['calories']:,.0f} kcal",
              f"P {meal['protein_g']:.0f}g · C {meal['carbs_g']:.0f}g · F {meal['fat_g']:.0f}g", "", day]

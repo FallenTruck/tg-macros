@@ -9,7 +9,7 @@ NUTRITION_MANIFEST ?= evals/nutrition/manifest.json
 
 .PHONY: recommendation-benchmark e2e-recommendations
 recommendation-benchmark:
-	$(E2E_PYTHON) -m unittest tests.test_recommendation_scenarios tests.test_post_log_messages tests.test_dietary_rules
+	$(E2E_PYTHON) -m unittest tests.test_recommendation_scenarios tests.test_post_log_messages tests.test_dietary_rules tests.test_retrospective_recommendations tests.test_profile_settings
 
 e2e-recommendations:
 	AWS_PROFILE="$(AWS_PROFILE)" AWS_REGION="$(AWS_REGION)" $(E2E_PYTHON) scripts/recommendation_smoke.py --live
@@ -29,7 +29,7 @@ sync-runtime:
 	cp lambda_handlers/lab_worker.py "$(RUNTIME_DIR)/lab_worker.py"
 	cp lambda_handlers/api.py "$(RUNTIME_DIR)/api.py"
 	cp lambda_handlers/webhook.py lambda_handlers/webhook_runtime/webhook.py
-	cp macro_bot/__init__.py macro_bot/nutrition_lab.py macro_bot/direct_estimator.py macro_bot/formatting.py macro_bot/models.py macro_bot/profile_targets.py macro_bot/recommendations.py macro_bot/serverless_auth.py macro_bot/serverless_data.py macro_bot/serverless_service.py macro_bot/workout_execution.py macro_bot/workout_programme.py "$(RUNTIME_DIR)/macro_bot/"
+	cp macro_bot/__init__.py macro_bot/nutrition_lab.py macro_bot/direct_estimator.py macro_bot/formatting.py macro_bot/models.py macro_bot/profile_targets.py macro_bot/recommendations.py macro_bot/recommendation_scenarios.py macro_bot/serverless_auth.py macro_bot/serverless_data.py macro_bot/serverless_service.py macro_bot/workout_execution.py macro_bot/workout_programme.py "$(RUNTIME_DIR)/macro_bot/"
 	cp food_catalog.json "$(RUNTIME_DIR)/food_catalog.json"
 
 nutrition-eval:
@@ -67,3 +67,13 @@ nutrition-corpus:
 
 nutrition-variance:
 	$(E2E_PYTHON) scripts/nutrition_variance.py --report
+
+.PHONY: profile-browser e2e-profile e2e-retrospective
+profile-browser:
+	$(E2E_PYTHON) -m unittest e2e.test_profile_browser
+
+e2e-profile:
+	RUN_JAVAAN_E2E=1 AWS_PROFILE="$(AWS_PROFILE)" AWS_REGION="$(AWS_REGION)" $(E2E_PYTHON) -m unittest e2e.test_live_app.LiveJavaanFitnessE2ETests.test_live_profile_settings
+
+e2e-retrospective:
+	AWS_PROFILE="$(AWS_PROFILE)" AWS_REGION="$(AWS_REGION)" $(E2E_PYTHON) scripts/retrospective_smoke.py --live
