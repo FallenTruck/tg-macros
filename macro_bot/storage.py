@@ -8,6 +8,7 @@ from typing import List
 from .config import CSV_FIELDNAMES
 from .identity import legacy_identity_for_person, map_legacy_people_to_user_ids
 from .models import (
+    DIETARY_PROFILE_FIELDS,
     CatalogSuggestion,
     DailyMacroSummary,
     FoodCatalogEntry,
@@ -176,6 +177,7 @@ class UserProfileStore:
                     "preferred_cuisines": list(item.get("preferred_cuisines", [])),
                     "preferred_staples": list(item.get("preferred_staples", [])),
                     "preferred_tags": list(item.get("preferred_tags", [])),
+                    **{key: item[key] for key in DIETARY_PROFILE_FIELDS if key in item},
                 }
             )
         migrated.sort(key=lambda item: int(item["telegram_user_id"]))

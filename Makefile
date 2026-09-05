@@ -9,7 +9,7 @@ NUTRITION_MANIFEST ?= evals/nutrition/manifest.json
 
 .PHONY: recommendation-benchmark e2e-recommendations
 recommendation-benchmark:
-	$(E2E_PYTHON) -m unittest tests.test_recommendation_scenarios tests.test_post_log_messages
+	$(E2E_PYTHON) -m unittest tests.test_recommendation_scenarios tests.test_post_log_messages tests.test_dietary_rules
 
 e2e-recommendations:
 	AWS_PROFILE="$(AWS_PROFILE)" AWS_REGION="$(AWS_REGION)" $(E2E_PYTHON) scripts/recommendation_smoke.py --live

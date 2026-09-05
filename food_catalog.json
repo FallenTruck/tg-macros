@@ -10,7 +10,9 @@
       "meal_type": "full_meal",
       "contains": ["poultry"],
       "available": true,
-      "nutrition_source": "Legacy curated serving estimate; not a verified restaurant or package label. See docs/RECOMMENDATIONS.md."
+      "nutrition_source": "Legacy curated serving estimate; not a verified restaurant or package label. See docs/RECOMMENDATIONS.md.",
+      "ingredients": ["chicken", "rice"],
+      "ingredients_complete": false
     },
     {
       "food_id": "grilled_chicken_wrap",
@@ -22,7 +24,9 @@
       "meal_type": "full_meal",
       "contains": ["poultry", "gluten"],
       "available": true,
-      "nutrition_source": "Legacy curated serving estimate; not a verified restaurant or package label. See docs/RECOMMENDATIONS.md."
+      "nutrition_source": "Legacy curated serving estimate; not a verified restaurant or package label. See docs/RECOMMENDATIONS.md.",
+      "ingredients": ["chicken", "wheat_wrap"],
+      "ingredients_complete": false
     },
     {
       "food_id": "double_protein_shake",
@@ -34,19 +38,23 @@
       "meal_type": "protein_top_up",
       "contains": ["dairy"],
       "available": true,
-      "nutrition_source": "Legacy curated serving estimate; not a verified restaurant or package label. See docs/RECOMMENDATIONS.md."
+      "nutrition_source": "Legacy curated serving estimate; not a verified restaurant or package label. See docs/RECOMMENDATIONS.md.",
+      "ingredients": ["whey_protein", "milk"],
+      "ingredients_complete": false
     },
     {
       "food_id": "egg_toast_plate",
       "name": "Egg and Toast Plate",
       "serving": "3 eggs with 2 slices toast",
       "macros": {"calories": 420, "protein_g": 26, "carbs_g": 28, "fat_g": 22},
-      "tags": ["high_fat", "home", "meal", "protein", "quick"],
+      "tags": ["high_fat", "home", "meal", "protein", "quick", "ovo_vegetarian"],
       "cuisines": ["western"],
       "meal_type": "light_meal",
       "contains": ["egg", "gluten"],
       "available": true,
-      "nutrition_source": "Legacy curated serving estimate; not a verified restaurant or package label. See docs/RECOMMENDATIONS.md."
+      "nutrition_source": "Legacy curated serving estimate; not a verified restaurant or package label. See docs/RECOMMENDATIONS.md.",
+      "ingredients": ["egg", "wheat_bread"],
+      "ingredients_complete": false
     },
     {
       "food_id": "salmon_rice_plate",
@@ -58,7 +66,9 @@
       "meal_type": "full_meal",
       "contains": ["fish"],
       "available": true,
-      "nutrition_source": "Legacy curated serving estimate; not a verified restaurant or package label. See docs/RECOMMENDATIONS.md."
+      "nutrition_source": "Legacy curated serving estimate; not a verified restaurant or package label. See docs/RECOMMENDATIONS.md.",
+      "ingredients": ["salmon", "rice"],
+      "ingredients_complete": false
     },
     {
       "food_id": "greek_yogurt_bowl",
@@ -70,7 +80,9 @@
       "meal_type": "snack",
       "contains": ["dairy", "nuts"],
       "available": true,
-      "nutrition_source": "Legacy curated serving estimate; not a verified restaurant or package label. See docs/RECOMMENDATIONS.md."
+      "nutrition_source": "Legacy curated serving estimate; not a verified restaurant or package label. See docs/RECOMMENDATIONS.md.",
+      "ingredients": ["greek_yogurt", "fruit", "nuts"],
+      "ingredients_complete": false
     },
     {
       "food_id": "tofu_veg_rice",
@@ -82,7 +94,9 @@
       "meal_type": "full_meal",
       "contains": ["soy"],
       "available": true,
-      "nutrition_source": "Legacy curated serving estimate; not a verified restaurant or package label. See docs/RECOMMENDATIONS.md."
+      "nutrition_source": "Legacy curated serving estimate; not a verified restaurant or package label. See docs/RECOMMENDATIONS.md.",
+      "ingredients": ["tofu", "rice"],
+      "ingredients_complete": false
     },
     {
       "food_id": "paneer_wrap",
@@ -94,7 +108,9 @@
       "meal_type": "full_meal",
       "contains": ["dairy", "gluten"],
       "available": true,
-      "nutrition_source": "Legacy curated serving estimate; not a verified restaurant or package label. See docs/RECOMMENDATIONS.md."
+      "nutrition_source": "Legacy curated serving estimate; not a verified restaurant or package label. See docs/RECOMMENDATIONS.md.",
+      "ingredients": ["paneer", "wheat_wrap"],
+      "ingredients_complete": false
     },
     {
       "food_id": "dal_rice_bowl",
@@ -106,7 +122,9 @@
       "meal_type": "full_meal",
       "contains": [],
       "available": true,
-      "nutrition_source": "Legacy curated serving estimate; not a verified restaurant or package label. See docs/RECOMMENDATIONS.md."
+      "nutrition_source": "Legacy curated serving estimate; not a verified restaurant or package label. See docs/RECOMMENDATIONS.md.",
+      "ingredients": ["lentils", "rice"],
+      "ingredients_complete": false
     },
     {
       "food_id": "chapati_paneer_combo",
@@ -118,7 +136,9 @@
       "meal_type": "full_meal",
       "contains": ["dairy", "gluten"],
       "available": true,
-      "nutrition_source": "Legacy curated serving estimate; not a verified restaurant or package label. See docs/RECOMMENDATIONS.md."
+      "nutrition_source": "Legacy curated serving estimate; not a verified restaurant or package label. See docs/RECOMMENDATIONS.md.",
+      "ingredients": ["chapati", "paneer"],
+      "ingredients_complete": false
     },
     {
       "food_id": "dosa_sambar_set",
@@ -130,7 +150,9 @@
       "meal_type": "light_meal",
       "contains": [],
       "available": true,
-      "nutrition_source": "Legacy curated serving estimate; not a verified restaurant or package label. See docs/RECOMMENDATIONS.md."
+      "nutrition_source": "Legacy curated serving estimate; not a verified restaurant or package label. See docs/RECOMMENDATIONS.md.",
+      "ingredients": ["rice", "lentils"],
+      "ingredients_complete": false
     },
     {
       "food_id": "poha_curd_plate",
@@ -142,7 +164,9 @@
       "meal_type": "light_meal",
       "contains": ["dairy"],
       "available": true,
-      "nutrition_source": "Legacy curated serving estimate; not a verified restaurant or package label. See docs/RECOMMENDATIONS.md."
+      "nutrition_source": "Legacy curated serving estimate; not a verified restaurant or package label. See docs/RECOMMENDATIONS.md.",
+      "ingredients": ["flattened_rice", "curd"],
+      "ingredients_complete": false
     },
     {
       "food_id": "chickpea_salad_wrap",
@@ -154,7 +178,9 @@
       "meal_type": "light_meal",
       "contains": ["gluten", "dairy"],
       "available": true,
-      "nutrition_source": "Legacy curated serving estimate; not a verified restaurant or package label. See docs/RECOMMENDATIONS.md."
+      "nutrition_source": "Legacy curated serving estimate; not a verified restaurant or package label. See docs/RECOMMENDATIONS.md.",
+      "ingredients": ["chickpea", "wheat_wrap", "yogurt"],
+      "ingredients_complete": false
     },
     {
       "food_id": "paneer_bhurji_toast",
@@ -166,7 +192,9 @@
       "meal_type": "full_meal",
       "contains": ["dairy", "gluten"],
       "available": true,
-      "nutrition_source": "Legacy curated serving estimate; not a verified restaurant or package label. See docs/RECOMMENDATIONS.md."
+      "nutrition_source": "Legacy curated serving estimate; not a verified restaurant or package label. See docs/RECOMMENDATIONS.md.",
+      "ingredients": ["paneer", "wheat_bread"],
+      "ingredients_complete": false
     },
     {
       "food_id": "fruit_nut_snack",
@@ -178,7 +206,9 @@
       "meal_type": "snack",
       "contains": ["nuts"],
       "available": true,
-      "nutrition_source": "Legacy curated serving estimate; not a verified restaurant or package label. See docs/RECOMMENDATIONS.md."
+      "nutrition_source": "Legacy curated serving estimate; not a verified restaurant or package label. See docs/RECOMMENDATIONS.md.",
+      "ingredients": ["fruit", "nuts"],
+      "ingredients_complete": false
     },
     {
       "food_id": "lean_chicken_salad",
@@ -190,19 +220,23 @@
       "meal_type": "light_meal",
       "contains": ["poultry"],
       "available": true,
-      "nutrition_source": "Legacy curated serving estimate; not a verified restaurant or package label. See docs/RECOMMENDATIONS.md."
+      "nutrition_source": "Legacy curated serving estimate; not a verified restaurant or package label. See docs/RECOMMENDATIONS.md.",
+      "ingredients": ["chicken"],
+      "ingredients_complete": false
     },
     {
       "food_id": "plain_greek_yogurt",
       "name": "Plain Nonfat Greek Yogurt",
-      "serving": "200g plain nonfat Greek yogurt",
+      "serving": "200g plain nonfat Greek yogurt (milk and cultures only)",
       "macros": {"calories": 120, "protein_g": 22, "carbs_g": 8, "fat_g": 0},
       "meal_type": "protein_top_up",
       "contains": ["dairy"],
       "tags": ["vegetarian", "high_protein", "low_fat", "light", "late_evening_friendly"],
       "cuisines": ["western"],
       "available": true,
-      "nutrition_source": "Curated reference-serving approximation for recommendation planning, not measured intake or verified product nutrition. See docs/RECOMMENDATIONS.md."
+      "nutrition_source": "Curated reference-serving approximation for recommendation planning, not measured intake or verified product nutrition. See docs/RECOMMENDATIONS.md.",
+      "ingredients": ["milk", "live_cultures"],
+      "ingredients_complete": true
     },
     {
       "food_id": "whey_water",
@@ -214,19 +248,23 @@
       "tags": ["vegetarian", "high_protein", "low_fat", "light", "late_evening_friendly"],
       "cuisines": [],
       "available": true,
-      "nutrition_source": "Curated reference-serving approximation for recommendation planning, not measured intake or verified product nutrition. See docs/RECOMMENDATIONS.md."
+      "nutrition_source": "Curated reference-serving approximation for recommendation planning, not measured intake or verified product nutrition. See docs/RECOMMENDATIONS.md.",
+      "ingredients": ["whey_protein", "water"],
+      "ingredients_complete": false
     },
     {
       "food_id": "soy_protein_water",
       "name": "Soy Protein with Water",
-      "serving": "30g soy protein powder with water",
+      "serving": "30g pure unflavoured soy protein powder with water",
       "macros": {"calories": 120, "protein_g": 24, "carbs_g": 3, "fat_g": 1},
       "meal_type": "protein_top_up",
       "contains": ["soy"],
       "tags": ["vegan", "vegetarian", "high_protein", "low_fat", "light", "late_evening_friendly", "dairy_free"],
       "cuisines": [],
       "available": true,
-      "nutrition_source": "Curated reference-serving approximation for recommendation planning, not measured intake or verified product nutrition. See docs/RECOMMENDATIONS.md."
+      "nutrition_source": "Curated reference-serving approximation for recommendation planning, not measured intake or verified product nutrition. See docs/RECOMMENDATIONS.md.",
+      "ingredients": ["soy_protein", "water"],
+      "ingredients_complete": true
     },
     {
       "food_id": "tofu_clear_soup",
@@ -238,7 +276,9 @@
       "tags": ["vegan", "vegetarian", "high_protein", "light", "late_evening_friendly", "dairy_free"],
       "cuisines": ["asian"],
       "available": true,
-      "nutrition_source": "Curated reference-serving approximation for recommendation planning, not measured intake or verified product nutrition. See docs/RECOMMENDATIONS.md."
+      "nutrition_source": "Curated reference-serving approximation for recommendation planning, not measured intake or verified product nutrition. See docs/RECOMMENDATIONS.md.",
+      "ingredients": ["tofu"],
+      "ingredients_complete": false
     },
     {
       "food_id": "lentil_tofu_bowl",
@@ -250,7 +290,9 @@
       "tags": ["vegan", "vegetarian", "high_protein", "dairy_free"],
       "cuisines": ["indian"],
       "available": true,
-      "nutrition_source": "Curated reference-serving approximation for recommendation planning, not measured intake or verified product nutrition. See docs/RECOMMENDATIONS.md."
+      "nutrition_source": "Curated reference-serving approximation for recommendation planning, not measured intake or verified product nutrition. See docs/RECOMMENDATIONS.md.",
+      "ingredients": ["lentils", "tofu", "rice"],
+      "ingredients_complete": false
     },
     {
       "food_id": "chicken_small_rice",
@@ -262,7 +304,9 @@
       "tags": ["high_protein"],
       "cuisines": ["asian"],
       "available": true,
-      "nutrition_source": "Curated reference-serving approximation for recommendation planning, not measured intake or verified product nutrition. See docs/RECOMMENDATIONS.md."
+      "nutrition_source": "Curated reference-serving approximation for recommendation planning, not measured intake or verified product nutrition. See docs/RECOMMENDATIONS.md.",
+      "ingredients": ["chicken", "rice"],
+      "ingredients_complete": false
     }
   ]
 }

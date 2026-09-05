@@ -528,6 +528,14 @@ class LoggedMealRow:
         }
 
 
+DIETARY_LIST_FIELDS = (
+    "dietary_preferences", "restrictions", "preferred_cuisines", "preferred_staples", "preferred_tags",
+    "allergens", "forbidden_ingredients", "forbidden_foods", "preferred_meal_styles",
+    "commonly_eaten_foods", "avoided_foods",
+)
+DIETARY_PROFILE_FIELDS = (*DIETARY_LIST_FIELDS, "diet_type", "eggs_allowed", "dairy_allowed", "variety_preference")
+
+
 @dataclass(frozen=True)
 class UserProfile:
     telegram_user_id: int
@@ -544,6 +552,41 @@ class UserProfile:
     preferred_cuisines: List[str] = field(default_factory=list)
     preferred_staples: List[str] = field(default_factory=list)
     preferred_tags: List[str] = field(default_factory=list)
+
+    diet_type: str = ""  # Empty means use the legacy saved diet/restriction flags.
+    eggs_allowed: Optional[bool] = None
+    dairy_allowed: Optional[bool] = None
+    allergens: List[str] = field(default_factory=list)
+    forbidden_ingredients: List[str] = field(default_factory=list)
+    forbidden_foods: List[str] = field(default_factory=list)
+    preferred_meal_styles: List[str] = field(default_factory=list)
+    commonly_eaten_foods: List[str] = field(default_factory=list)
+    avoided_foods: List[str] = field(default_factory=list)
+    variety_preference: str = "balanced"
+
+    def __post_init__(self):
+        if not isinstance(self.diet_type, str):
+            raise ValueError("diet_type must be a string")
+        diet = self.diet_type.strip().lower().replace("-", "_").replace(" ", "_")
+        if diet not in {"", "vegetarian", "non_vegetarian", "vegan"}:
+            raise ValueError("diet_type must be vegetarian, non_vegetarian, or vegan")
+        object.__setattr__(self, "diet_type", diet)
+        for key in ("eggs_allowed", "dairy_allowed"):
+            value = getattr(self, key)
+            if value is not None and type(value) is not bool:
+                raise ValueError(f"{key} must be a boolean or null")
+        for key in DIETARY_LIST_FIELDS:
+            values = getattr(self, key)
+            if not isinstance(values, list) or len(values) > 32 or any(
+                not isinstance(value, str) or not value.strip() or len(value) > 100 for value in values
+            ):
+                raise ValueError(f"{key} must be a list of up to 32 nonempty strings of at most 100 characters")
+        if self.variety_preference not in {"balanced", "high", "low"}:
+            raise ValueError("variety_preference must be balanced, high, or low")
+
+    def dietary_profile_payload(self) -> Dict[str, object]:
+        return {key: list(getattr(self, key)) if key in DIETARY_LIST_FIELDS else getattr(self, key)
+                for key in DIETARY_PROFILE_FIELDS}
 
     @classmethod
     def from_payload(cls, payload: Dict[str, object]) -> "UserProfile":
@@ -567,11 +610,7 @@ class UserProfile:
             updated_at=str(payload.get("updated_at", "") or ""),
             timezone=str(payload.get("timezone", "Asia/Singapore") or "Asia/Singapore"),
             created_at=str(payload.get("created_at", "") or ""),
-            dietary_preferences=[str(x) for x in payload.get("dietary_preferences", [])],
-            restrictions=[str(x) for x in payload.get("restrictions", [])],
-            preferred_cuisines=[str(x) for x in payload.get("preferred_cuisines", [])],
-            preferred_staples=[str(x) for x in payload.get("preferred_staples", [])],
-            preferred_tags=[str(x) for x in payload.get("preferred_tags", [])],
+            **{key: payload[key] for key in DIETARY_PROFILE_FIELDS if key in payload},
         )
 
     def to_payload(self) -> Dict[str, object]:
@@ -589,11 +628,7 @@ class UserProfile:
             "updated_at": self.updated_at,
             "timezone": self.timezone,
             "created_at": self.created_at,
-            "dietary_preferences": list(self.dietary_preferences),
-            "restrictions": list(self.restrictions),
-            "preferred_cuisines": list(self.preferred_cuisines),
-            "preferred_staples": list(self.preferred_staples),
-            "preferred_tags": list(self.preferred_tags),
+            **self.dietary_profile_payload(),
         }
 
 
@@ -610,6 +645,8 @@ class FoodCatalogEntry:
     contains: List[str] = field(default_factory=list)
     available: bool = True
     nutrition_source: str = "Legacy curated serving estimate; recipe-dependent."
+    ingredients: List[str] = field(default_factory=list)
+    ingredients_complete: bool = False
 
     def __post_init__(self):
         if self.meal_type not in {"full_meal", "light_meal", "snack", "protein_top_up"}:
@@ -637,6 +674,8 @@ class FoodCatalogEntry:
             contains=[str(x) for x in payload.get("contains", [])],
             available=payload.get("available", True) is True,
             nutrition_source=str(payload.get("nutrition_source", "Legacy curated serving estimate; recipe-dependent.")),
+            ingredients=[str(x) for x in payload.get("ingredients", [])],
+            ingredients_complete=payload.get("ingredients_complete", False) is True,
         )
 
     def to_payload(self) -> Dict[str, object]:
@@ -652,6 +691,8 @@ class FoodCatalogEntry:
             "contains": list(self.contains),
             "available": self.available,
             "nutrition_source": self.nutrition_source,
+            "ingredients": list(self.ingredients),
+            "ingredients_complete": self.ingredients_complete,
         }
 
 

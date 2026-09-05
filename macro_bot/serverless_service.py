@@ -10,7 +10,7 @@ from pathlib import Path
 from typing import Any, Dict, Mapping, Optional
 from zoneinfo import ZoneInfo
 
-from .models import MacroTotal, QuestionnaireAnswers, RemainingMacros, UserProfile
+from .models import DIETARY_PROFILE_FIELDS, MacroTotal, QuestionnaireAnswers, RemainingMacros, UserProfile
 from .profile_targets import (
     ACTIVITY_LEVEL_OPTIONS,
     GOAL_OPTIONS,
@@ -199,22 +199,23 @@ class NutritionService:
         except Exception as err:
             raise InvalidUserInput("timezone is invalid") from err
         now = utc_iso(self._now())
-        profile = UserProfile(
-            telegram_user_id=identity.telegram_user_id,
-            username=identity.username or (existing.username if existing else ""),
-            display_name=identity.display_name or (existing.display_name if existing else ""),
-            daily_target=derive_daily_target(answers),
-            questionnaire_answers=answers,
-            questionnaire_version="miniapp-v2",
-            updated_at=now,
-            timezone=timezone_name,
-            created_at=existing.created_at if existing else now,
-            dietary_preferences=list(payload.get("dietary_preferences", existing.dietary_preferences if existing else [])),
-            restrictions=list(payload.get("restrictions", existing.restrictions if existing else [])),
-            preferred_cuisines=list(payload.get("preferred_cuisines", existing.preferred_cuisines if existing else [])),
-            preferred_staples=list(payload.get("preferred_staples", existing.preferred_staples if existing else [])),
-            preferred_tags=list(payload.get("preferred_tags", existing.preferred_tags if existing else [])),
-        )
+        dietary_payload = existing.dietary_profile_payload() if existing else {}
+        dietary_payload.update({key: payload[key] for key in DIETARY_PROFILE_FIELDS if key in payload})
+        try:
+            profile = UserProfile(
+                telegram_user_id=identity.telegram_user_id,
+                username=identity.username or (existing.username if existing else ""),
+                display_name=identity.display_name or (existing.display_name if existing else ""),
+                daily_target=derive_daily_target(answers),
+                questionnaire_answers=answers,
+                questionnaire_version="miniapp-v2",
+                updated_at=now,
+                timezone=timezone_name,
+                created_at=existing.created_at if existing else now,
+                **dietary_payload,
+            )
+        except (TypeError, ValueError) as err:
+            raise InvalidUserInput(str(err)) from err
         self.repository.save_profile(identity, profile, effective_at=self._now(), source="miniapp")
         response = self.profile_response(identity)
         response["preview"] = self.preview_payload(payload)

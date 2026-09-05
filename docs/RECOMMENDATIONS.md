@@ -72,21 +72,58 @@ and late-evening suitability. `contains` records declared ingredient categories;
 The 16 generic dishes no longer carry personal Telegram allowlists. Six additions
 cover nonfat Greek yogurt, whey/water, soy protein/water, tofu soup, lentil/tofu
 and lean chicken with a smaller rice portion. Vegetarian and vegan options span
-Asian, Indian and Western choices. Egg/toast retains its previous exclusion from
-the vegetarian catalogue. The generic catalogue is therefore usable by
+Asian, Indian and Western choices. Egg/toast has an explicit `ovo_vegetarian` tag: it is eligible for vegetarian
+profiles only when `eggs_allowed=true`. Existing vegetarian profiles without an
+egg allowance keep their previous exclusion. The generic catalogue is therefore usable by
 `javaan-e2e` and real profiles with matching restrictions, without an ID bypass.
 Personal catalogue-growth approvals still retain their explicit per-user scope;
 nonempty `eligible_telegram_user_ids` remains enforced for those entries.
 
-Hard filtering occurs before scoring/model ranking. Vegetarian/vegan profile
-restrictions (also those explicit dietary preferences) require affirmative tags
-and reject contradictory animal ingredient metadata. `no_X` and `X_free` require
-an affirmative curated `X_free` tag and no matching declared ingredient. Unknown
-hard restrictions require a matching affirmative tag, otherwise fail closed.
-This small recipe catalogue is not a certified allergen/cross-contact database.
-Missing safety metadata never becomes model permission to recommend a food.
-Cuisine, staple and style preferences remain soft signals.
+Hard filtering occurs before scoring/model ranking. The saved profile owns two
+separate sets of rules:
 
+| Hard constraints | Soft ranking preferences |
+| --- | --- |
+| `diet_type`: `vegetarian`, `non_vegetarian`, `vegan` | `preferred_cuisines` |
+| `eggs_allowed`, `dairy_allowed`: boolean or null | `preferred_staples` |
+| `allergens`, existing `restrictions` | `preferred_meal_styles`, existing `preferred_tags` |
+| `forbidden_ingredients` | `commonly_eaten_foods` |
+| `forbidden_foods`: catalogue IDs or exact names | `avoided_foods` |
+| Legacy explicit free-from/allergy flags | `variety_preference`: `balanced`, `high`, `low` |
+
+The authenticated profile API reads/saves these fields and preserves omitted
+fields during ordinary questionnaire/target updates. Arrays accept up to 32
+nonempty strings of at most 100 characters; allowances require actual JSON
+booleans/null, never truthy strings. No new frontend form controls are part of
+this backend change. File-backed profiles and identity migration retain the same
+fields. No real-user diet values are changed by deployment.
+
+An empty `diet_type` uses the legacy saved vegetarian/vegan flags. An explicit
+diet type takes precedence over legacy preference labels; restriction flags still
+apply. Vegetarian profiles default to no eggs unless explicitly allowed;
+non-vegetarian status permits, but never requires, meat. Vegan rules still forbid
+egg/dairy even when allowance fields conflict. Explicit bans/allergens always
+win over allowances. Free-from/allergy flags previously saved in
+`dietary_preferences` retain their hard meaning. Macro fit, time and preferences
+never participate in eligibility and cannot reinstate a forbidden candidate.
+
+Known ingredient evidence (`contains` plus `ingredients`, normalized aliases and
+category relationships such as whey→dairy) defeats contradictory free-from tags.
+Allergens and restriction flags require affirmative `X_free` tags; unknown flags
+fail closed without a matching affirmative tag. For egg/dairy allowance bans,
+legacy vegetarian/vegan tags supply their established absence guarantees unless
+contradicted by known ingredients. Explicit ingredient bans otherwise require an
+affirmative absence tag or a nonempty, explicitly complete reference ingredient
+list. Most composed dishes have partial lists because sauces, seasonings and
+packaged subingredients are unknown; they cannot prove an arbitrary ingredient
+absent. Only the specified plain yogurt and pure soy/water reference servings
+currently mark their ingredient lists complete. This does not certify product
+allergen cross-contact. Forbidden-food IDs/names use normalized exact matching;
+use `forbidden_ingredients` to exclude an ingredient across different dishes.
+
+The model receives the already-enforced hard context and bounded soft
+preferences, and only valid candidate IDs. Invalid IDs in a response trigger
+fallback from the valid set.
 All serving macros are fixed **planning approximations**, not measured intake,
 verified restaurant/package labels, or nutrition ground truth. Existing macros
 are unchanged. Each new entry names its intended serving and declares its source
@@ -109,8 +146,10 @@ Additional signals:
 - Subtract `min(50, (candidate_kcal - remaining_kcal - 120)/10)` for calorie overshoot above that tolerance.
 - -24 when <15g fat remains and candidate fat exceeds the remainder by >8g.
 - -14 for >55g candidate carbs after confirmed daily carbs exceed 65% of target.
-- +8 matching cuisine, +6 preferred tag, +6 preferred staple in the name.
-- -18 per name token longer than three characters repeated in the last six meal captions.
+- +8 matching cuisine, +6 preferred style/tag, +6 preferred staple matched in the food ID, name or declared ingredients.
+- +4 for a commonly eaten food; -12 for a softly avoided food (neither changes dietary eligibility).
+- -18 per name token longer than three characters repeated in the last six meal captions, multiplied by 1.5 for high variety preference or 0.5 for low variety preference; balanced preserves 1.0.
+- Style matches combine `preferred_tags` and `preferred_meal_styles` for the single +6 bonus. Equally fitting cuisines retain the +8 preferred-cuisine advantage.
 
 Timing adjustments are additive. A candidate may incur several penalties:
 
@@ -155,7 +194,7 @@ queued historical recommendations are rechecked after midnight.
 ## Verification and limits
 
 `make recommendation-benchmark` runs deterministic scenario properties and
-production callback failure/order tests without OpenAI. `make e2e-recommendations`
+production callback failure/order tests without OpenAI. The dietary scenarios include vegetarian with/without eggs, dairy restriction, prohibited ingredients, equal-fit Indian/Western meals, conflict precedence, model input safety and profile roundtrips. `make e2e-recommendations`
 invokes only the gated dev Lab Lambda, resets/verifies only the marked synthetic
 baseline, calls the deployed planner at 18:30 and 22:30, verifies actual suggestion
 IDs/types and unchanged domain state, then restores the baseline. See

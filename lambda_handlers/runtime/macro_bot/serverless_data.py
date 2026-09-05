@@ -761,11 +761,7 @@ class DynamoNutritionRepository:
             "daily_target": _target_payload(profile.daily_target),
             "questionnaire_answers": profile.questionnaire_answers.to_payload() if profile.questionnaire_answers else None,
             "questionnaire_version": profile.questionnaire_version,
-            "dietary_preferences": list(profile.dietary_preferences),
-            "restrictions": list(profile.restrictions),
-            "preferred_cuisines": list(profile.preferred_cuisines),
-            "preferred_staples": list(profile.preferred_staples),
-            "preferred_tags": list(profile.preferred_tags),
+            **profile.dietary_profile_payload(),
             "created_at": created_at,
             "updated_at": now,
         }
