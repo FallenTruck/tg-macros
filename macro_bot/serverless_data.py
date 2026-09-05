@@ -787,7 +787,14 @@ class DynamoNutritionRepository:
         )
         return [_from_storage(item) for item in items]
 
-    def target_effective_at(self, user_id: str, at: Optional[datetime] = None) -> Optional[MacroTotal]:
+    def target_revision_at(self, user_id: str, at: Optional[datetime] = None) -> Optional[dict[str, Any]]:
+        """Return the target revision effective at a UTC instant.
+
+        A profile without target history is an older migrated record, so its
+        current target remains the fallback just as it does for
+        ``target_effective_at``.
+        """
+
         moment = at or self._now()
         if moment.tzinfo is None:
             moment = moment.replace(tzinfo=timezone.utc)
@@ -796,16 +803,23 @@ class DynamoNutritionRepository:
         for item in targets:
             try:
                 if parse_utc(str(item.get("effective_at"))) <= cutoff:
-                    return MacroTotal.from_payload(dict(item["target"]))
+                    return {
+                        "target_id": str(item.get("target_id", "")),
+                        "effective_at": str(item.get("effective_at", "")),
+                        "target": dict(item["target"]),
+                    }
             except (KeyError, ValueError, TypeError):
                 continue
-        # A profile target is the current fallback only when no target history
-        # exists at all. A lookup before the first effective target must not
-        # incorrectly report a later/current target.
         if targets:
             return None
         profile = self.get_profile(user_id)
-        return profile.daily_target if profile else None
+        if profile is None:
+            return None
+        return {"target_id": "", "effective_at": None, "target": profile.daily_target.to_payload()}
+
+    def target_effective_at(self, user_id: str, at: Optional[datetime] = None) -> Optional[MacroTotal]:
+        revision = self.target_revision_at(user_id, at=at)
+        return MacroTotal.from_payload(revision["target"]) if revision else None
 
     # ---- Durable workflow ------------------------------------------------------
 

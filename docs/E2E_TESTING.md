@@ -95,6 +95,9 @@ records. It then writes the deterministic baseline profile:
 male · age 30 · 180 cm · 80 kg · moderately active · maintain · Asia/Singapore
 ```
 
+It also adds one confirmed `E2E baseline meal` for the current Singapore local
+day so the live nutrition history check exercises a non-empty meal list.
+
 The live smoke targets only this account and may be reset again afterward.
 
 ## Run live checks
@@ -108,8 +111,9 @@ make e2e-smoke
 ```
 
 The smoke test covers browser login, generic bad-password rejection, refresh
-session persistence, logout, Home/Profile/Workout navigation, responsive
-overflow checks at 390 px, 360 px, and desktop width, and a PULL workout that:
+session persistence, logout, Home/Nutrition/Profile/Workout navigation, local-day
+nutrition history navigation, responsive overflow checks at 390 px, 360 px, and
+desktop width, and a PULL workout that:
 
 1. saves a working set
 2. repeats the previous set and saves it
@@ -130,6 +134,7 @@ make e2e-screenshots
 Screenshots are written to the ignored `artifacts/e2e/` directory:
 
 - `home-mobile.png`
+- `nutrition-mobile.png`
 - `workout-programme-mobile.png`
 - `workout-active-mobile.png`
 - `workout-complete-mobile.png`

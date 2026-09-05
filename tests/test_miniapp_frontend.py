@@ -133,9 +133,11 @@ class MiniAppFrontendTests(unittest.TestCase):
             'data-testid="browser-login-submit"',
             'data-testid="logout"',
             'data-testid="bottom-navigation"',
+            'data-testid="nav-nutrition"',
             'data-testid="nav-profile"',
             'data-testid="nav-workout"',
             'data-testid="workout-completion-dock"',
+            'data-testid="nutrition-meal-list"',
         ):
             self.assertIn(selector, markup)
         for selector in (
@@ -146,6 +148,25 @@ class MiniAppFrontendTests(unittest.TestCase):
             'data-testid="submit-workout"',
         ):
             self.assertIn(selector, source)
+
+    def test_nutrition_view_is_read_only_and_supports_local_day_history(self):
+        root = Path(__file__).parents[1]
+        source = (root / "miniapp" / "app.js").read_text(encoding="utf-8")
+        markup = (root / "miniapp" / "index.html").read_text(encoding="utf-8")
+        styles = (root / "miniapp" / "styles.css").read_text(encoding="utf-8")
+        self.assertIn('const NUTRITION_VIEW = "nutrition";', source)
+        self.assertIn('apiFetch(`/api/nutrition/day${query}`)', source)
+        self.assertIn('data-action="previous-day"', markup)
+        self.assertIn('data-action="next-day"', markup)
+        self.assertIn('id="nutrition-view"', markup)
+        self.assertIn('data-testid="nav-nutrition"', markup)
+        self.assertIn('normalizeDateKey(day.today)', source)
+        self.assertIn('data-testid="nutrition-progress-${key}"', source)
+        self.assertIn('data-testid="nutrition-meal-${escapeHtml(mealId)}"', source)
+        self.assertIn("Only confirmed Telegram meals are included.", source)
+        self.assertIn("nutrition-progress-grid", styles)
+        self.assertIn("nutrition-meal-list", styles)
+        self.assertNotIn("/api/meals", source)
 
 
 if __name__ == "__main__":

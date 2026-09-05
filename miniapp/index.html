@@ -100,6 +100,21 @@
             </a>
           </section>
 
+          <section class="panel home-summary-panel home-daily-summary-panel">
+            <div class="panel-head">
+              <div>
+                <p class="section-label">Today</p>
+                <h3 id="home-daily-summary-title">Nutrition loading…</h3>
+              </div>
+              <p id="home-daily-summary-meta">Open Nutrition for the full day view.</p>
+            </div>
+            <div class="summary-empty" id="home-daily-summary-empty">
+              Your confirmed meals and daily progress will appear here.
+            </div>
+            <div class="mini-macro-grid" id="home-daily-summary-macros" hidden></div>
+            <a href="#nutrition" class="secondary summary-cta action-link">Open Nutrition</a>
+          </section>
+
           <section class="panel home-summary-panel">
             <div class="panel-head">
               <div>
@@ -110,6 +125,47 @@
             </div>
             <p class="summary-empty">View the current shared programme and its planned training days.</p>
             <a href="#workout" class="primary summary-cta action-link">View Programme</a>
+          </section>
+        </section>
+
+        <section class="app-view" id="nutrition-view" data-view="nutrition" hidden>
+          <section class="panel nutrition-header-panel">
+            <div class="panel-head">
+              <div>
+                <p class="section-label">Nutrition</p>
+                <h2 id="nutrition-day-title">Today</h2>
+              </div>
+              <p id="nutrition-day-meta">Your confirmed meals for the selected day.</p>
+            </div>
+            <div class="nutrition-day-nav" data-testid="nutrition-day-navigation">
+              <button class="ghost-button" id="nutrition-previous-day" data-testid="nutrition-previous-day" data-action="previous-day" type="button">← Previous day</button>
+              <span class="nutrition-date-label" id="nutrition-date-label">Loading date…</span>
+              <button class="ghost-button" id="nutrition-next-day" data-testid="nutrition-next-day" data-action="next-day" type="button">Next day →</button>
+            </div>
+          </section>
+
+          <section class="panel nutrition-progress-panel">
+            <div class="panel-head">
+              <div>
+                <p class="section-label">Daily progress</p>
+                <h3 id="nutrition-progress-title">Loading your progress…</h3>
+              </div>
+              <p id="nutrition-progress-meta">Target · consumed · remaining</p>
+            </div>
+            <div class="summary-empty" id="nutrition-progress-empty" hidden></div>
+            <div class="nutrition-progress-grid" id="nutrition-progress-grid" hidden></div>
+          </section>
+
+          <section class="panel nutrition-meals-panel">
+            <div class="panel-head">
+              <div>
+                <p class="section-label">Meal history</p>
+                <h3 id="nutrition-meals-title">Confirmed meals</h3>
+              </div>
+              <p id="nutrition-meals-meta">No meals loaded yet.</p>
+            </div>
+            <div class="summary-empty" id="nutrition-meals-empty" hidden></div>
+            <div class="nutrition-meal-list" id="nutrition-meals-list" data-testid="nutrition-meal-list" hidden></div>
           </section>
         </section>
 
@@ -309,6 +365,18 @@
         </svg>
         <span>Home</span>
       </a>
+      <a href="#nutrition" class="nav-item" id="nav-nutrition" data-testid="nav-nutrition" data-route="nutrition">
+        <svg viewBox="0 0 24 24" aria-hidden="true">
+          <path d="M7.5 4.5c-1.4 0-2.5 1.1-2.5 2.5v5.2c0 3.7 3 6.8 6.8 6.8h.4c3.7 0 6.8-3 6.8-6.8V7c0-1.4-1.1-2.5-2.5-2.5H7.5Zm-.5 3h10v4.7c0 2.1-1.7 3.8-3.8 3.8h-2.4c-2.1 0-3.8-1.7-3.8-3.8V7.5Zm-2.5-3v3h-2v-3h2Zm17 0v3h-2v-3h2Z" />
+        </svg>
+        <span>Nutrition</span>
+      </a>
+      <a href="#workout" class="nav-item" id="nav-workout" data-testid="nav-workout" data-route="workout">
+        <svg viewBox="0 0 24 24" aria-hidden="true">
+          <path d="M5 9v6m14-6v6M8 7v10m8-10v10M8 12h8M3 10v4m18-4v4" />
+        </svg>
+        <span>Workout</span>
+      </a>
       <a href="#profile" class="nav-item" id="nav-profile" data-testid="nav-profile" data-route="profile">
         <svg viewBox="0 0 24 24" aria-hidden="true">
           <path
@@ -316,12 +384,6 @@
           />
         </svg>
         <span>Profile</span>
-      </a>
-      <a href="#workout" class="nav-item" id="nav-workout" data-testid="nav-workout" data-route="workout">
-        <svg viewBox="0 0 24 24" aria-hidden="true">
-          <path d="M5 9v6m14-6v6M8 7v10m8-10v10M8 12h8M3 10v4m18-4v4" />
-        </svg>
-        <span>Workout</span>
       </a>
     </nav>
 

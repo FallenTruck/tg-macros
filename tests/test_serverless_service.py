@@ -92,6 +92,39 @@ class ServerlessServiceTests(unittest.TestCase):
         preview = NutritionService.preview_payload(payload)
         self.assertEqual(preview["questionnaire_answers"], self.answers.to_payload())
 
+    def test_daily_nutrition_payload_reuses_confirmed_daily_summary_and_local_target_revision(self):
+        identity = self.service.resolve_user(101, "a", "A")
+        self.repo.save_profile(identity, self._profile(identity, 2000), effective_at=datetime(2026, 1, 1, tzinfo=timezone.utc))
+        included = self.service.create_pending_meal(
+            identity,
+            chat_id=1,
+            request_message_id=2,
+            caption="breakfast",
+            estimate=_estimate(500),
+            eaten_at=datetime(2026, 1, 15, 3, tzinfo=timezone.utc),
+        )
+        excluded = self.service.create_pending_meal(
+            identity,
+            chat_id=1,
+            request_message_id=3,
+            caption="yesterday",
+            estimate=_estimate(700),
+            eaten_at=datetime(2026, 1, 14, 15, 59, tzinfo=timezone.utc),
+        )
+        self.service.finalize_action(identity, included.token, "confirm")
+        self.service.finalize_action(identity, excluded.token, "confirm")
+
+        payload = self.service.daily_nutrition_payload(identity, datetime(2026, 1, 15).date())
+
+        self.assertEqual(payload["date"], "2026-01-15")
+        self.assertEqual(payload["today"], "2026-01-15")
+        self.assertEqual(payload["timezone"], "Asia/Singapore")
+        self.assertEqual(payload["target"]["calories"], 2000.0)
+        self.assertEqual(payload["consumed"]["calories"], 500.0)
+        self.assertEqual(payload["remaining"]["calories"], 1500.0)
+        self.assertEqual(payload["meal_count"], 1)
+        self.assertEqual([meal["caption"] for meal in payload["meals"]], ["breakfast"])
+
 
 if __name__ == "__main__":
     unittest.main()

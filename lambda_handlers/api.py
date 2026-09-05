@@ -713,6 +713,24 @@ async def get_meals(
     return _no_store(service.meals_payload(identity, date_start, date_end or date_start))
 
 
+@app.get("/api/nutrition")
+@app.get("/api/nutrition/day")
+async def get_daily_nutrition(
+    request: Request,
+    target_date: Optional[date] = Query(default=None, alias="date"),
+    x_telegram_init_data: str = Header(default="", alias="X-Telegram-Init-Data"),
+) -> JSONResponse:
+    """Return one authenticated user's local-day nutrition dashboard."""
+
+    service = _service()
+    identity = _auth_identity(request, service)
+    try:
+        result = service.daily_nutrition_payload(identity, target_date)
+    except ValueError as err:
+        raise HTTPException(status_code=400, detail=str(err)) from err
+    return _no_store(result)
+
+
 @app.api_route("/api/{path:path}", methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"])
 async def unknown_api_route(path: str) -> JSONResponse:
     return _no_store({"error": "not_found", "path": f"/api/{path}"}, status_code=404)

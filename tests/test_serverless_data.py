@@ -355,6 +355,19 @@ class ServerlessDataTests(unittest.TestCase):
         self.repo.save_profile(identity, profile, effective_at=datetime(2026, 2, 1, tzinfo=timezone.utc))
         self.assertIsNone(self.repo.target_effective_at(identity.user_id, datetime(2026, 1, 1, tzinfo=timezone.utc)))
 
+    def test_target_revision_payload_resolves_the_revision_at_an_instant(self):
+        identity = self.repo.resolve_identity(101, "u", "User")
+        answers = QuestionnaireAnswers("male", 30, 180, 80, "moderate", "maintain")
+        old = UserProfile(101, "u", "User", MacroTotal(2000, 150, 200, 60), answers)
+        new = UserProfile(101, "u", "User", MacroTotal(2300, 160, 250, 70), answers)
+        self.repo.save_profile(identity, old, effective_at=datetime(2026, 1, 1, tzinfo=timezone.utc))
+        self.repo.save_profile(identity, new, effective_at=datetime(2026, 2, 1, tzinfo=timezone.utc))
+
+        revision = self.repo.target_revision_at(identity.user_id, datetime(2026, 1, 15, tzinfo=timezone.utc))
+
+        self.assertEqual(revision["target"]["calories"], 2000.0)
+        self.assertEqual(revision["effective_at"], "2026-01-01T00:00:00Z")
+
     def test_query_paginates_all_user_partition_items(self):
         table = _PaginatingTable()
         repo = DynamoNutritionRepository(table, table_name="fitness", now_fn=lambda: self.now)

@@ -219,6 +219,33 @@ class BrowserAuthenticationTests(unittest.TestCase):
         self.assertEqual(profile_a.json()["viewer"]["telegram_user_id"], 101)
         self.assertEqual(profile_b.json()["viewer"]["telegram_user_id"], 202)
 
+    def test_daily_nutrition_endpoint_has_the_same_browser_and_telegram_result(self):
+        answers = {
+            "sex": "male",
+            "age_years": 30,
+            "height_cm": 180,
+            "weight_kg": 80,
+            "activity_level": "moderate",
+            "goal": "maintain",
+        }
+        self.service.save_profile(self.identity, answers)
+        with self._api()[0], self._api()[1], patch.object(api, "bot_token_from_environment", return_value="test-token"):
+            self.assertEqual(
+                self.client.post(
+                    "/api/auth/login",
+                    json={"username": "KnownUser", "password": self.password},
+                    headers={"Origin": "https://testserver"},
+                ).status_code,
+                200,
+            )
+            browser = self.client.get("/api/nutrition/day?date=2026-01-15")
+            telegram = self.client.get("/api/nutrition/day?date=2026-01-15", headers={"X-Telegram-Init-Data": _init_data()})
+
+        self.assertEqual(browser.status_code, 200)
+        self.assertEqual(telegram.status_code, 200)
+        self.assertEqual(browser.json(), telegram.json())
+        self.assertEqual(browser.json()["date"], "2026-01-15")
+
 
 if __name__ == "__main__":
     unittest.main()

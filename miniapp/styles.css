@@ -342,6 +342,12 @@ label,
   margin-top: 18px;
 }
 
+.home-daily-summary-panel {
+  background:
+    radial-gradient(circle at top left, rgba(49, 113, 75, 0.1), transparent 34%),
+    linear-gradient(135deg, rgba(247, 252, 246, 0.96), rgba(255, 250, 244, 0.92));
+}
+
 .mini-macro-grid,
 .macro-grid {
   display: grid;
@@ -720,6 +726,147 @@ button:disabled {
   margin-top: 16px;
 }
 
+.nutrition-header-panel,
+.nutrition-progress-panel,
+.nutrition-meals-panel {
+  padding: 24px;
+}
+
+.nutrition-progress-panel,
+.nutrition-meals-panel {
+  margin-top: 16px;
+}
+
+.nutrition-day-nav {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
+  align-items: center;
+  gap: 12px;
+  padding-top: 4px;
+}
+
+.nutrition-day-nav button:last-child {
+  justify-self: end;
+}
+
+.nutrition-date-label {
+  color: var(--ink);
+  font-family: Georgia, "Times New Roman", serif;
+  font-size: 1.12rem;
+  text-align: center;
+}
+
+.nutrition-progress-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.nutrition-progress-card {
+  padding: 16px;
+  border: 1px solid var(--line);
+  border-radius: 20px;
+  background: var(--panel-strong);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.56);
+}
+
+.nutrition-progress-card-head,
+.nutrition-progress-values,
+.nutrition-meal-head,
+.nutrition-meal-macros {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.nutrition-progress-label {
+  font-family: Georgia, "Times New Roman", serif;
+  font-size: 1.08rem;
+}
+
+.nutrition-progress-unit,
+.nutrition-progress-values span,
+.nutrition-meal-time,
+.nutrition-meal-macros,
+.nutrition-meal-calories {
+  color: var(--muted);
+  font-size: 0.82rem;
+}
+
+.nutrition-progress-values {
+  margin-top: 18px;
+}
+
+.nutrition-progress-values div {
+  display: grid;
+  gap: 5px;
+}
+
+.nutrition-progress-values strong {
+  color: var(--ink);
+  font-size: 1.16rem;
+}
+
+.nutrition-progress-remaining {
+  margin: 16px 0 0;
+  padding-top: 12px;
+  border-top: 1px solid var(--line);
+  color: #31714b;
+  font-size: 0.9rem;
+}
+
+.nutrition-progress-remaining.is-over {
+  color: var(--accent-deep);
+}
+
+.nutrition-meal-list {
+  display: grid;
+  gap: 12px;
+}
+
+.nutrition-meal-card {
+  padding: 16px;
+  border: 1px solid var(--line);
+  border-radius: 20px;
+  background: var(--panel-soft);
+}
+
+.nutrition-meal-head h4 {
+  margin: 6px 0 0;
+  font-family: Georgia, "Times New Roman", serif;
+  font-size: 1.08rem;
+  font-weight: 600;
+}
+
+.nutrition-meal-time {
+  margin: 0;
+}
+
+.nutrition-meal-calories {
+  flex-shrink: 0;
+  color: var(--accent-deep);
+  font-family: Georgia, "Times New Roman", serif;
+  font-size: 1rem;
+}
+
+.nutrition-meal-macros {
+  justify-content: flex-start;
+  flex-wrap: wrap;
+  margin-top: 16px;
+  padding-top: 12px;
+  border-top: 1px solid var(--line);
+}
+
+.nutrition-meal-macros span {
+  display: inline-flex;
+  gap: 4px;
+}
+
+.nutrition-meal-macros strong {
+  color: var(--ink);
+}
+
 .workout-programme {
   display: grid;
   gap: 16px;
@@ -1031,7 +1178,7 @@ button:disabled {
   transform: translateX(-50%);
   width: min(920px, calc(100vw - 24px));
   display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
+  grid-template-columns: repeat(4, minmax(0, 1fr));
   gap: 10px;
   padding: 10px;
   border: 1px solid rgba(67, 49, 27, 0.12);
@@ -1109,7 +1256,10 @@ button:disabled {
   .home-summary-panel,
   .profile-panel,
   .questionnaire-shell,
-  .preview-panel {
+  .preview-panel,
+  .nutrition-header-panel,
+  .nutrition-progress-panel,
+  .nutrition-meals-panel {
     padding: 18px;
   }
 
@@ -1117,6 +1267,35 @@ button:disabled {
   .goal-grid,
   .macro-grid,
   .mini-macro-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .nutrition-day-nav {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .nutrition-date-label {
+    grid-column: 1 / -1;
+    grid-row: 1;
+  }
+
+  .nutrition-day-nav button:first-of-type,
+  .nutrition-day-nav button:last-child {
+    grid-row: 2;
+    width: 100%;
+    padding-inline: 10px;
+    font-size: 0.88rem;
+  }
+
+  .nutrition-day-nav button:first-of-type {
+    grid-column: 1;
+  }
+
+  .nutrition-day-nav button:last-child {
+    grid-column: 2;
+  }
+
+  .nutrition-progress-grid {
     grid-template-columns: 1fr;
   }
 

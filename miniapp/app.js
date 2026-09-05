@@ -2,6 +2,7 @@ const tg = window.Telegram?.WebApp ?? null;
 const initData = String(tg?.initData ?? "").trim();
 
 const HOME_VIEW = "home";
+const NUTRITION_VIEW = "nutrition";
 const PROFILE_VIEW = "profile";
 const QUESTIONNAIRE_VIEW = "questionnaire";
 const WORKOUT_VIEW = "workout";
@@ -16,10 +17,17 @@ const WORKOUT_SKIP_REASONS = [
   ["intentionally_skipped", "Just skip"],
   ["other", "Other"],
 ];
+const NUTRITION_METRICS = [
+  ["calories", "Calories", "kcal"],
+  ["protein_g", "Protein", "g"],
+  ["carbs_g", "Carbs", "g"],
+  ["fat_g", "Fat", "g"],
+];
 
 const state = {
   meta: null,
   profile: null,
+  nutritionDay: null,
   preview: null,
   workoutProgramme: null,
   activeWorkout: null,
@@ -28,6 +36,7 @@ const state = {
   hasAuth: false,
   activeView: HOME_VIEW,
   workoutMode: WORKOUT_PROGRAMME_MODE,
+  nutritionError: "",
 };
 
 const form = document.querySelector("#questionnaire-form");
@@ -70,6 +79,25 @@ const homeSummaryMeta = document.querySelector("#home-summary-meta");
 const homeSummaryEmpty = document.querySelector("#home-summary-empty");
 const homeSummaryMacros = document.querySelector("#home-summary-macros");
 const openProfileButton = document.querySelector("#open-profile-button");
+const homeDailySummaryTitle = document.querySelector("#home-daily-summary-title");
+const homeDailySummaryMeta = document.querySelector("#home-daily-summary-meta");
+const homeDailySummaryEmpty = document.querySelector("#home-daily-summary-empty");
+const homeDailySummaryMacros = document.querySelector("#home-daily-summary-macros");
+
+const nutritionView = document.querySelector("#nutrition-view");
+const nutritionDayTitle = document.querySelector("#nutrition-day-title");
+const nutritionDayMeta = document.querySelector("#nutrition-day-meta");
+const nutritionDateLabel = document.querySelector("#nutrition-date-label");
+const nutritionPreviousDay = document.querySelector("#nutrition-previous-day");
+const nutritionNextDay = document.querySelector("#nutrition-next-day");
+const nutritionProgressTitle = document.querySelector("#nutrition-progress-title");
+const nutritionProgressMeta = document.querySelector("#nutrition-progress-meta");
+const nutritionProgressEmpty = document.querySelector("#nutrition-progress-empty");
+const nutritionProgressGrid = document.querySelector("#nutrition-progress-grid");
+const nutritionMealsTitle = document.querySelector("#nutrition-meals-title");
+const nutritionMealsMeta = document.querySelector("#nutrition-meals-meta");
+const nutritionMealsEmpty = document.querySelector("#nutrition-meals-empty");
+const nutritionMealsList = document.querySelector("#nutrition-meals-list");
 
 const viewerInitial = document.querySelector("#viewer-initial");
 const profileViewerTitle = document.querySelector("#profile-viewer-title");
@@ -102,6 +130,7 @@ workoutSessionEl?.addEventListener("click", handleWorkoutClick);
 workoutSessionEl?.addEventListener("change", handleWorkoutChange);
 workoutSessionEl?.addEventListener("submit", handleWorkoutSubmit);
 workoutCompletionDockEl?.addEventListener("click", handleWorkoutClick);
+nutritionView?.addEventListener("click", handleNutritionClick);
 
 form.addEventListener("input", () => {
   state.preview = null;
@@ -157,6 +186,11 @@ saveButton.addEventListener("click", async () => {
     renderProfileSummary();
     renderQuestionnaireContext();
     renderPreview();
+    try {
+      await loadDailyNutrition(state.nutritionDay?.date || null);
+    } catch (_error) {
+      // Keep the saved profile success state even if the dashboard refresh fails.
+    }
     setQuestionnaireNote("Target saved. Recommendations will now use this profile.", "success");
     setStatus("", "neutral");
     if (tg?.HapticFeedback?.notificationOccurred) {
@@ -180,10 +214,11 @@ async function bootstrap() {
 
   state.meta = fallbackMeta;
   renderMeta(fallbackMeta);
-  renderViewer();
-  renderHomeSummary();
-  renderProfileSummary();
-  renderWorkoutProgramme();
+    renderViewer();
+    renderHomeSummary();
+    renderProfileSummary();
+    renderNutrition();
+    renderWorkoutProgramme();
   syncRoute();
 
   if (initData) {
@@ -222,12 +257,19 @@ async function loadAuthenticatedApp(profileResponse = null) {
     renderViewer();
     renderHomeSummary();
     renderProfileSummary();
+    renderNutrition();
     if (state.profile?.questionnaire_answers) {
       hydrateForm(state.profile.questionnaire_answers);
     }
     renderQuestionnaireContext();
     renderWorkoutProgramme();
     setStatus("", "neutral");
+    try {
+      await loadDailyNutrition();
+    } catch (_error) {
+      // The dedicated view renders its own read error; profile and workout
+      // navigation remain available if the day query is temporarily down.
+    }
     await loadWorkoutProgramme();
     await loadActiveWorkout();
     if (response.launch_context?.launch_type === "workout") {
@@ -310,6 +352,7 @@ async function handleBrowserLogout() {
   try {
     await apiFetch("/api/auth/logout", {method: "POST"});
     state.profile = null;
+    state.nutritionDay = null;
     state.preview = null;
     state.workoutProgramme = null;
     state.activeWorkout = null;
@@ -343,6 +386,24 @@ async function loadActiveWorkout() {
     if (workoutSessionEl) {
       workoutSessionEl.innerHTML = `<section class="panel profile-panel"><p class="summary-empty">${escapeHtml(error.message || "Could not load the active workout.")}</p></section>`;
     }
+  }
+}
+
+async function loadDailyNutrition(targetDate = null) {
+  const normalizedDate = normalizeDateKey(targetDate);
+  const query = normalizedDate ? `?date=${encodeURIComponent(normalizedDate)}` : "";
+  try {
+    const response = await apiFetch(`/api/nutrition/day${query}`);
+    state.nutritionDay = response;
+    state.nutritionError = "";
+    renderNutrition();
+    renderHomeSummary();
+    return response;
+  } catch (error) {
+    state.nutritionError = error.message || "Could not load your nutrition history.";
+    renderNutrition();
+    renderHomeSummary();
+    throw error;
   }
 }
 
@@ -402,14 +463,14 @@ function viewerInitialValue(viewer) {
 
 function normalizeRoute(hash = window.location.hash) {
   const route = String(hash || "").replace(/^#/, "").trim().toLowerCase();
-  if (route === PROFILE_VIEW || route === QUESTIONNAIRE_VIEW || route === WORKOUT_VIEW) {
+  if (route === NUTRITION_VIEW || route === PROFILE_VIEW || route === QUESTIONNAIRE_VIEW || route === WORKOUT_VIEW) {
     return route;
   }
   return HOME_VIEW;
 }
 
 function navigateTo(view) {
-  const route = view === QUESTIONNAIRE_VIEW || view === PROFILE_VIEW || view === WORKOUT_VIEW ? view : HOME_VIEW;
+  const route = view === NUTRITION_VIEW || view === QUESTIONNAIRE_VIEW || view === PROFILE_VIEW || view === WORKOUT_VIEW ? view : HOME_VIEW;
   const targetHash = `#${route}`;
   if (window.location.hash === targetHash) {
     renderRoute(route);
@@ -431,21 +492,15 @@ function renderRoute(route) {
   const enteringWorkout = route === WORKOUT_VIEW && state.activeView !== WORKOUT_VIEW;
   state.activeView = route;
   homeView.hidden = route !== HOME_VIEW;
+  nutritionView.hidden = route !== NUTRITION_VIEW;
   profileView.hidden = route !== PROFILE_VIEW;
   questionnaireView.hidden = route !== QUESTIONNAIRE_VIEW;
   workoutView.hidden = route !== WORKOUT_VIEW;
 
   for (const button of navButtons) {
-    const buttonRoute = button.dataset.route === PROFILE_VIEW
-      ? PROFILE_VIEW
-      : button.dataset.route === WORKOUT_VIEW
-        ? WORKOUT_VIEW
-        : HOME_VIEW;
-    const isActive = buttonRoute === HOME_VIEW
-      ? route === HOME_VIEW
-      : buttonRoute === WORKOUT_VIEW
-        ? route === WORKOUT_VIEW
-        : route === PROFILE_VIEW || route === QUESTIONNAIRE_VIEW;
+    const buttonRoute = button.dataset.route || HOME_VIEW;
+    const isActive = buttonRoute === route
+      || (buttonRoute === PROFILE_VIEW && route === QUESTIONNAIRE_VIEW);
     button.classList.toggle("is-active", isActive);
     button.setAttribute("aria-current", isActive ? "page" : "false");
   }
@@ -870,6 +925,181 @@ function formatSetRange(min, max) {
   return min === max ? `${min} sets` : `${min}–${max} sets`;
 }
 
+async function handleNutritionClick(event) {
+  const button = event.target.closest("[data-action]");
+  if (!button || button.disabled || !state.nutritionDay) return;
+  const delta = button.dataset.action === "previous-day" ? -1 : button.dataset.action === "next-day" ? 1 : 0;
+  if (!delta) return;
+  const nextDate = shiftDateKey(state.nutritionDay.date, delta);
+  if (delta > 0 && nextDate > (normalizeDateKey(state.nutritionDay.today) || todayDateKey(state.nutritionDay.timezone))) return;
+  nutritionPreviousDay.disabled = true;
+  nutritionNextDay.disabled = true;
+  try {
+    await loadDailyNutrition(nextDate);
+  } catch (error) {
+    setStatus(error.message || "Could not load that day.", "error");
+  } finally {
+    renderNutrition();
+  }
+}
+
+function renderNutrition() {
+  const day = state.nutritionDay;
+  const hasDay = Boolean(day && normalizeDateKey(day.date));
+  const target = day?.target;
+
+  if (!hasDay) {
+    nutritionDayTitle.textContent = "Nutrition history";
+    nutritionDayMeta.textContent = state.nutritionError || "Your confirmed meals for the selected day.";
+    nutritionDateLabel.textContent = "Loading date…";
+    nutritionProgressTitle.textContent = state.nutritionError ? "Nutrition unavailable" : "Loading your progress…";
+    nutritionProgressMeta.textContent = "Target · consumed · remaining";
+    nutritionProgressEmpty.textContent = state.nutritionError || "Your daily progress will appear here.";
+    nutritionProgressEmpty.hidden = false;
+    nutritionProgressGrid.hidden = true;
+    nutritionMealsMeta.textContent = "No meals loaded yet.";
+    nutritionMealsEmpty.textContent = state.nutritionError || "Your confirmed meals will appear here.";
+    nutritionMealsEmpty.hidden = false;
+    nutritionMealsList.hidden = true;
+    nutritionPreviousDay.disabled = true;
+    nutritionNextDay.disabled = true;
+    renderHomeDailySummary();
+    return;
+  }
+
+  const today = normalizeDateKey(day.today) || todayDateKey(day.timezone);
+  nutritionDayTitle.textContent = day.date === today ? "Today" : formatNutritionDate(day.date);
+  nutritionDayMeta.textContent = `${day.meal_count || 0} confirmed ${(day.meal_count || 0) === 1 ? "meal" : "meals"} · ${day.timezone || "local time"}`;
+  nutritionDateLabel.textContent = formatNutritionDate(day.date);
+  nutritionPreviousDay.disabled = false;
+  nutritionNextDay.disabled = day.date >= today;
+
+  if (!target) {
+    nutritionProgressTitle.textContent = "No target saved yet";
+    nutritionProgressMeta.textContent = "Set a target in Profile to see remaining macros.";
+    nutritionProgressEmpty.textContent = "Open Profile to create your first calorie and macro target.";
+    nutritionProgressEmpty.hidden = false;
+    nutritionProgressGrid.hidden = true;
+  } else {
+    nutritionProgressTitle.textContent = `${formatNutritionAmount(target.calories, "calories")} target`;
+    nutritionProgressMeta.textContent = day.target_effective_at
+      ? `Effective from ${formatIso(day.target_effective_at)}`
+      : "Using your saved target";
+    nutritionProgressEmpty.hidden = true;
+    nutritionProgressGrid.hidden = false;
+    nutritionProgressGrid.innerHTML = nutritionProgressCards(day);
+  }
+
+  const meals = Array.isArray(day.meals) ? day.meals : [];
+  nutritionMealsTitle.textContent = `${meals.length} confirmed ${meals.length === 1 ? "meal" : "meals"}`;
+  nutritionMealsMeta.textContent = "Only confirmed Telegram meals are included.";
+  nutritionMealsEmpty.textContent = "No confirmed meals for this day.";
+  nutritionMealsEmpty.hidden = meals.length > 0;
+  nutritionMealsList.hidden = meals.length === 0;
+  nutritionMealsList.innerHTML = meals.map((meal, index) => nutritionMealCard(meal, day.timezone, index)).join("");
+  renderHomeDailySummary();
+}
+
+function nutritionProgressCards(day) {
+  return NUTRITION_METRICS.map(([key, label]) => {
+    const consumed = day.consumed?.[key] ?? 0;
+    const target = day.target?.[key] ?? 0;
+    const rawRemaining = Number(day.remaining_raw?.[key] ?? day.remaining?.[key] ?? 0);
+    const remaining = day.remaining?.[key] ?? Math.max(0, rawRemaining);
+    const overTarget = rawRemaining < 0;
+    return `<article class="nutrition-progress-card" data-testid="nutrition-progress-${key}">
+      <div class="nutrition-progress-card-head"><span class="nutrition-progress-label">${label}</span><span class="nutrition-progress-unit">${key === "calories" ? "Daily total" : "Daily macro"}</span></div>
+      <div class="nutrition-progress-values">
+        <div><span>Consumed</span><strong>${escapeHtml(formatNutritionAmount(consumed, key))}</strong></div>
+        <div><span>Target</span><strong>${escapeHtml(formatNutritionAmount(target, key))}</strong></div>
+      </div>
+      <p class="nutrition-progress-remaining${overTarget ? " is-over" : ""}">${escapeHtml(overTarget ? `${formatNutritionAmount(Math.abs(rawRemaining), key)} over target` : `${formatNutritionAmount(remaining, key)} remaining`)}</p>
+    </article>`;
+  }).join("");
+}
+
+function nutritionMealCard(meal, timezone, index) {
+  const macros = meal.macros || {};
+  const mealId = String(meal.meal_id || meal.eaten_at || `meal-${index}`).replace(/[^a-zA-Z0-9_-]/g, "-");
+  return `<article class="nutrition-meal-card" data-testid="nutrition-meal-${escapeHtml(mealId)}">
+    <div class="nutrition-meal-head">
+      <div><p class="nutrition-meal-time">${escapeHtml(formatMealTime(meal.eaten_at, timezone))}</p><h4>${escapeHtml(meal.caption || "Confirmed meal")}</h4></div>
+      <strong class="nutrition-meal-calories">${escapeHtml(formatNutritionAmount(macros.calories, "calories"))}</strong>
+    </div>
+    <div class="nutrition-meal-macros">
+      <span>Protein <strong>${escapeHtml(formatNutritionAmount(macros.protein_g, "protein_g"))}</strong></span>
+      <span>Carbs <strong>${escapeHtml(formatNutritionAmount(macros.carbs_g, "carbs_g"))}</strong></span>
+      <span>Fat <strong>${escapeHtml(formatNutritionAmount(macros.fat_g, "fat_g"))}</strong></span>
+    </div>
+  </article>`;
+}
+
+function renderHomeDailySummary() {
+  const day = state.nutritionDay;
+  if (!day || !day.target) {
+    homeDailySummaryTitle.textContent = state.nutritionError ? "Nutrition unavailable" : "Nutrition loading…";
+    homeDailySummaryMeta.textContent = state.nutritionError || "Open Nutrition for the full day view.";
+    homeDailySummaryEmpty.textContent = state.nutritionError || "Your confirmed meals and daily progress will appear here.";
+    homeDailySummaryEmpty.hidden = false;
+    homeDailySummaryMacros.hidden = true;
+    homeDailySummaryMacros.innerHTML = "";
+    return;
+  }
+
+  homeDailySummaryTitle.textContent = `${formatNutritionAmount(day.consumed?.calories, "calories")} consumed`;
+  homeDailySummaryMeta.textContent = `${formatNutritionAmount(day.target.calories, "calories")} target · ${day.meal_count || 0} confirmed ${(day.meal_count || 0) === 1 ? "meal" : "meals"}`;
+  homeDailySummaryEmpty.hidden = true;
+  homeDailySummaryMacros.hidden = false;
+  homeDailySummaryMacros.innerHTML = NUTRITION_METRICS.map(([key, label]) => (
+    compactMacroCard(label, `${formatNutritionAmount(day.consumed?.[key], key)} / ${formatNutritionAmount(day.target?.[key], key)}`)
+  )).join("");
+}
+
+function formatNutritionAmount(value, key) {
+  const amount = Number(value || 0);
+  if (key === "calories") return `${Math.round(amount)} kcal`;
+  return `${amount.toFixed(1)} g`;
+}
+
+function formatMealTime(value, timezone) {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return value || "Time unavailable";
+  try {
+    return date.toLocaleTimeString(undefined, {hour: "numeric", minute: "2-digit", timeZone: timezone || "UTC"});
+  } catch (_error) {
+    return formatIso(value);
+  }
+}
+
+function formatNutritionDate(value) {
+  const date = new Date(`${normalizeDateKey(value)}T12:00:00Z`);
+  if (Number.isNaN(date.getTime())) return value || "Date unavailable";
+  return date.toLocaleDateString(undefined, {weekday: "short", month: "short", day: "numeric", year: "numeric", timeZone: "UTC"});
+}
+
+function normalizeDateKey(value) {
+  const match = String(value || "").trim().match(/^\d{4}-\d{2}-\d{2}$/);
+  return match ? match[0] : "";
+}
+
+function shiftDateKey(value, delta) {
+  const dateKey = normalizeDateKey(value);
+  if (!dateKey) return "";
+  const [year, month, day] = dateKey.split("-").map(Number);
+  const shifted = new Date(Date.UTC(year, month - 1, day + delta));
+  return shifted.toISOString().slice(0, 10);
+}
+
+function todayDateKey(timezone) {
+  try {
+    const parts = new Intl.DateTimeFormat("en-US", {timeZone: timezone || "UTC", year: "numeric", month: "2-digit", day: "2-digit"}).formatToParts(new Date());
+    const values = Object.fromEntries(parts.filter((part) => part.type !== "literal").map((part) => [part.type, part.value]));
+    return `${values.year}-${values.month}-${values.day}`;
+  } catch (_error) {
+    return new Date().toISOString().slice(0, 10);
+  }
+}
+
 function renderViewer() {
   const viewer = normalizeViewer(state.viewer);
   const primary = viewerPrimaryLabel(viewer);
@@ -894,6 +1124,7 @@ function renderHomeSummary() {
     homeSummaryMacros.hidden = true;
     homeSummaryMacros.innerHTML = "";
     openProfileButton.textContent = "Set Up Targets";
+    renderHomeDailySummary();
     return;
   }
 
@@ -905,6 +1136,7 @@ function renderHomeSummary() {
   homeSummaryMacros.hidden = false;
   homeSummaryMacros.innerHTML = compactMacroCards(state.profile.daily_target);
   openProfileButton.textContent = "View Profile";
+  renderHomeDailySummary();
 }
 
 function renderProfileSummary() {

@@ -92,6 +92,38 @@ class LiveJavaanFitnessE2ETests(unittest.TestCase):
         if route == "workout":
             page.get_by_test_id("workout-day-start-PULL").wait_for(state="visible", timeout=30_000)
 
+    def _check_nutrition_history(self, page: Any) -> None:
+        self._navigate(page, "nutrition", "#nutrition-view")
+        progress = page.get_by_test_id("nutrition-progress-calories")
+        progress.wait_for(state="visible", timeout=30_000)
+        self.assertIn("Consumed", progress.inner_text())
+        self.assertIn("Target", progress.inner_text())
+        self.assertIn("remaining", progress.inner_text())
+        meal_list = page.get_by_test_id("nutrition-meal-list")
+        meal_list.wait_for(state="visible", timeout=30_000)
+        meals = meal_list.locator('[data-testid^="nutrition-meal-"]')
+        if meals.count() < 1:
+            raise AssertionError("nutrition history did not render the E2E baseline meal")
+        self.assertIn("E2E baseline meal", meal_list.inner_text())
+        self.assertTrue(page.locator("#nutrition-meals-empty").is_hidden())
+
+        date_label = page.locator("#nutrition-date-label")
+        current_date = date_label.inner_text()
+        previous = page.get_by_test_id("nutrition-previous-day")
+        previous.click()
+        page.wait_for_function(
+            "expected => document.getElementById('nutrition-date-label')?.textContent !== expected",
+            arg=current_date,
+            timeout=30_000,
+        )
+        self.assertTrue(page.get_by_test_id("nutrition-next-day").is_enabled())
+        page.get_by_test_id("nutrition-next-day").click()
+        page.wait_for_function(
+            "expected => document.getElementById('nutrition-date-label')?.textContent === expected",
+            arg=current_date,
+            timeout=30_000,
+        )
+
     def _start_workout(self, page: Any) -> None:
         start = page.get_by_test_id("workout-day-start-PULL")
         start.wait_for(state="visible", timeout=30_000)
@@ -228,6 +260,7 @@ class LiveJavaanFitnessE2ETests(unittest.TestCase):
             page.reload(wait_until="domcontentloaded", timeout=45_000)
             self._wait_for_app_ready(page)
             self._assert_no_horizontal_overflow(page)
+            self._check_nutrition_history(page)
             self._navigate(page, "profile", "#profile-view")
             self._navigate(page, "workout", "#workout-view")
             self._run_workout_flow(page)
@@ -237,6 +270,7 @@ class LiveJavaanFitnessE2ETests(unittest.TestCase):
             self._wait_for_app_ready(page)
             self._assert_no_horizontal_overflow(page)
             self._navigate(page, "home", "#home-view")
+            self._check_nutrition_history(page)
             self._navigate(page, "profile", "#profile-view")
             self._navigate(page, "workout", "#workout-view")
 
@@ -262,6 +296,8 @@ class LiveJavaanFitnessE2ETests(unittest.TestCase):
             self._login(page)
             self._assert_no_horizontal_overflow(page)
             page.screenshot(path=str(output_dir / "home-mobile.png"), full_page=True)
+            self._check_nutrition_history(page)
+            page.screenshot(path=str(output_dir / "nutrition-mobile.png"), full_page=True)
             self._navigate(page, "workout", "#workout-view")
             page.screenshot(path=str(output_dir / "workout-programme-mobile.png"), full_page=True)
             self._start_workout(page)

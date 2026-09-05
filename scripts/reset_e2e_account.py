@@ -5,11 +5,14 @@ from __future__ import annotations
 
 import argparse
 import sys
+from datetime import datetime, time, timedelta, timezone
 from pathlib import Path
 from typing import Any
+from zoneinfo import ZoneInfo
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
+from macro_bot.models import MealEstimate
 from macro_bot.serverless_data import DynamoNutritionRepository
 from macro_bot.serverless_service import NutritionService
 from scripts.e2e_support import (
@@ -67,7 +70,31 @@ def reset_e2e_account(*, table: Any, repository: DynamoNutritionRepository) -> i
         raise E2EAccountSafetyError("the E2E identity does not match the configured account")
 
     deleted = delete_user_partition(table, E2E_USER_ID)
-    NutritionService(repository).save_profile(identity, dict(BASELINE_PROFILE_PAYLOAD))
+    service = NutritionService(repository)
+    service.save_profile(identity, dict(BASELINE_PROFILE_PAYLOAD))
+    timezone_name = BASELINE_PROFILE_PAYLOAD["timezone"]
+    timezone_info = ZoneInfo(timezone_name)
+    local_now = repository._now().astimezone(timezone_info)
+    local_day_start = datetime.combine(local_now.date(), time.min, tzinfo=timezone_info)
+    eaten_at = max(local_day_start, local_now - timedelta(minutes=5)).astimezone(timezone.utc)
+    action = repository.create_pending_meal(
+        identity,
+        chat_id=0,
+        request_message_id=0,
+        caption="E2E baseline meal",
+        estimate=MealEstimate(
+            meal_name="E2E baseline meal",
+            calories=600,
+            protein_g=40,
+            carbs_g=60,
+            fat_g=15,
+            confidence=1.0,
+            notes="Deterministic E2E fixture",
+        ),
+        eaten_at=eaten_at,
+        username=E2E_USERNAME,
+    )
+    repository.finalize_action(identity, action.token, "confirm")
     return deleted
 
 

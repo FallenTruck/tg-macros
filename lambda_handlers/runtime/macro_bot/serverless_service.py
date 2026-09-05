@@ -5,12 +5,12 @@ from __future__ import annotations
 import json
 import logging
 import os
-from datetime import date, datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Dict, Mapping, Optional
 from zoneinfo import ZoneInfo
 
-from .models import MacroTotal, QuestionnaireAnswers, UserProfile
+from .models import MacroTotal, QuestionnaireAnswers, RemainingMacros, UserProfile
 from .profile_targets import (
     ACTIVITY_LEVEL_OPTIONS,
     GOAL_OPTIONS,
@@ -285,6 +285,53 @@ class NutritionService:
         return {
             "date_start": active_start.isoformat(),
             "date_end": active_end.isoformat(),
+            "meals": [_meal_payload(meal) for meal in meals],
+        }
+
+    def daily_nutrition_payload(self, identity: ServerlessIdentity, target_date: Optional[date] = None) -> dict[str, Any]:
+        """Return the read-only dashboard for one user's local calendar day."""
+
+        profile = self.repository.get_profile(identity.user_id)
+        timezone_name = profile.timezone if profile else DEFAULT_TIMEZONE
+        active_date = target_date or self._local_date(identity)
+        start_iso, end_iso = local_day_utc_bounds(active_date, timezone_name)
+        daily_summary = self.repository.daily_summary(identity, active_date, timezone_name)
+        meals = self.repository.list_meals_between(identity, start_iso, end_iso, confirmed_only=True)
+
+        # Target revisions are effective at an instant. Looking up just before
+        # the next local midnight makes a selected historical day use the
+        # revision that was active during that day, while keeping the end
+        # boundary exclusive for meals.
+        target_revision = self.repository.target_revision_at(
+            identity.user_id,
+            at=parse_utc(end_iso) - timedelta(microseconds=1),
+        )
+        target = MacroTotal.from_payload(target_revision["target"]) if target_revision else None
+        remaining = RemainingMacros.from_target_and_consumed(target, daily_summary.totals) if target else None
+        summary_payload = remaining.to_payload() if remaining else {
+            "target": None,
+            "consumed": daily_summary.totals.to_payload(),
+            "remaining_raw": None,
+            "remaining": None,
+            "over_calories": False,
+            "over_protein": False,
+            "over_carbs": False,
+            "over_fat": False,
+        }
+        return {
+            "date": active_date.isoformat(),
+            "today": self._local_date(identity).isoformat(),
+            "timezone": timezone_name,
+            "target_effective_at": target_revision.get("effective_at") if target_revision else None,
+            "target": summary_payload["target"],
+            "consumed": summary_payload["consumed"],
+            "remaining": summary_payload["remaining"],
+            "remaining_raw": summary_payload["remaining_raw"],
+            "over_calories": summary_payload["over_calories"],
+            "over_protein": summary_payload["over_protein"],
+            "over_carbs": summary_payload["over_carbs"],
+            "over_fat": summary_payload["over_fat"],
+            "meal_count": daily_summary.meal_count,
             "meals": [_meal_payload(meal) for meal in meals],
         }
 
