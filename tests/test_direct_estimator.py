@@ -90,6 +90,13 @@ class DirectEstimatorTests(unittest.TestCase):
         self.assertEqual(responses.calls[0]["text"]["format"]["name"], "meal_macros")
         self.assertNotIn("metrics_event_id", _estimate_payload(result.estimate))
 
+    def test_model_version_is_unconditionally_overwritten(self):
+        from macro_bot.direct_estimator import ESTIMATOR_APPLICATION_VERSION
+        for version in ("invented", "", None):
+            payload = _structured_payload()
+            payload["estimator_version"] = version
+            self.assertEqual(validate_result(payload)["estimator_version"], ESTIMATOR_APPLICATION_VERSION)
+
     def test_openai_client_uses_bounded_timeout_and_no_sdk_retries(self):
         responses = _Responses(_estimate_payload(_estimate()).copy())
         fake_client = Mock(responses=responses)

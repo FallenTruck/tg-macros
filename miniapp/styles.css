@@ -1382,3 +1382,6 @@ button:disabled {
 .nutrition-lab pre { white-space: pre-wrap; overflow-wrap: anywhere; font-size: 12px; max-height: 520px; overflow: auto; padding: 12px; background: #f4f5f2; border-radius: 12px; }
 .lab-actions { display: flex; flex-wrap: wrap; gap: 10px; margin: 16px 0; }
 .lab-actions button { flex: 1 1 140px; }
+
+.lab-actions[hidden] { display: none; }
+.nutrition-lab section { min-width: 0; }

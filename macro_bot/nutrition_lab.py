@@ -6,6 +6,8 @@ import io
 import json
 import os
 import re
+from datetime import datetime, timezone
+from zoneinfo import ZoneInfo
 from typing import Any
 
 from PIL import Image, UnidentifiedImageError
@@ -18,6 +20,7 @@ USERNAME = "javaan-e2e"
 USER_ID = "e2e-javaan-e2e"
 IDENTITY_PK = "IDENTITY#E2E#javaan-e2e"
 USER_PK = f"USER#{USER_ID}"
+JOB_PK = "LAB#javaan-e2e"
 MAX_IMAGE_BYTES = 3_000_000  # JSON/base64 fits the API Lambda invocation limit.
 MAX_BODY_BYTES = 4_010_000
 JOB_TTL_SECONDS = 86400
@@ -84,12 +87,41 @@ def validate_image(image: bytes) -> None:
 
 
 class NutritionLab:
-    def __init__(self, service, *, s3=None, lambda_client=None):
+    def __init__(self, service, *, s3=None, lambda_client=None, jobs_table=None):
         self.service = service
         self.repo = service.repository
         self.identity = require_identity(self.repo)
         self.s3 = s3
         self.lambda_client = lambda_client
+        self._jobs_table = jobs_table
+
+    @property
+    def jobs(self):
+        if self._jobs_table is None:
+            import boto3
+            self._jobs_table = boto3.resource("dynamodb").Table(os.environ["E2E_NUTRITION_LAB_JOBS_TABLE"])
+        return self._jobs_table
+
+    def _job_item(self, key):
+        return self.jobs.get_item(Key=key, ConsistentRead=True).get("Item")
+
+    def _profile_revision(self):
+        profile = self.repo._get({"PK": USER_PK, "SK": "PROFILE"}) or {}
+        return profile.get("e2e_reset_revision") or profile.get("updated_at")
+
+    def _eaten_at(self, value, mode):
+        if not value:
+            return None
+        if mode != "log" or not isinstance(value, str):
+            raise ValueError("Meal time is supported only for full log tests.")
+        try:
+            parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+            if parsed.tzinfo is None:
+                profile = self.repo.get_profile(USER_ID)
+                parsed = parsed.replace(tzinfo=ZoneInfo(profile.timezone))
+            return parsed.astimezone(timezone.utc).isoformat()
+        except (ValueError, AttributeError, TypeError) as err:
+            raise ValueError("Enter an ISO meal time in the saved user timezone.") from err
 
     def _clients(self):
         import boto3
@@ -99,10 +131,10 @@ class NutritionLab:
             self.lambda_client = boto3.client("lambda")
 
     def _key(self, job_id):
-        return {"PK": USER_PK, "SK": f"LAB_JOB#{validate_job_id(job_id)}"}
+        return {"PK": JOB_PK, "SK": f"LAB_JOB#{validate_job_id(job_id)}"}
 
     def read(self, job_id):
-        item = self.repo._get(self._key(job_id))
+        item = self._job_item(self._key(job_id))
         if not item or item.get("expires_at", 0) <= epoch_seconds(self.repo._now()):
             raise KeyError("Lab job not found.")
         return _from_storage(item)
@@ -114,7 +146,7 @@ class NutritionLab:
         else:
             kwargs.update(ConditionExpression="#status = :expected", ExpressionAttributeNames={"#status": "status"},
                           ExpressionAttributeValues={":expected": expected})
-        self.repo.table.put_item(**kwargs)
+        self.jobs.put_item(**kwargs)
 
     def _dispatch(self, job_id, operation):
         self._clients()
@@ -125,12 +157,13 @@ class NutritionLab:
         if response.get("StatusCode") != 202:
             raise RuntimeError("Lab dispatch failed")
 
-    def submit(self, job_id, image, caption, mode):
+    def submit(self, job_id, image, caption, mode, eaten_at=None):
         validate_job_id(job_id)
         if mode not in {"estimate", "log"} or not isinstance(caption, str) or len(caption) > 1000:
             raise ValueError("Choose estimate or log mode and a caption of at most 1000 characters.")
         validate_image(image)
-        digest = hashlib.sha256(image + json.dumps([caption, mode]).encode()).hexdigest()
+        eaten_at = self._eaten_at(eaten_at, mode)
+        digest = hashlib.sha256(image + json.dumps([caption, mode, eaten_at]).encode()).hexdigest()
         try:
             previous = self.read(job_id)
         except KeyError:
@@ -141,7 +174,7 @@ class NutritionLab:
             if previous["status"] == "queued":
                 self._dispatch(job_id, "analyze")
             return self.response(job_id)
-        if self.repo._get(self._key(job_id)):
+        if self._job_item(self._key(job_id)):
             raise LabConflict("That Lab request has expired. Submit with a new request id.")
         now = epoch_seconds(self.repo._now())
         object_key = f"nutrition-lab/{job_id}/{digest}"
@@ -150,26 +183,26 @@ class NutritionLab:
                            ContentType="application/octet-stream", ServerSideEncryption="AES256")
         item = {**self._key(job_id), "entity_type": "nutrition_lab_job", "job_id": job_id,
                 "status": "queued", "mode": mode, "caption": caption, "image_key": object_key,
-                "request_hash": digest, "created_at": now, "expires_at": now + JOB_TTL_SECONDS}
+                "request_hash": digest, "eaten_at": eaten_at, "profile_revision": self._profile_revision(), "created_at": now, "expires_at": now + JOB_TTL_SECONDS}
         try:
             self._put(item)
         except Exception as err:
             if _is_conditional_failure(err):
-                return self.submit(job_id, image, caption, mode)
+                return self.submit(job_id, image, caption, mode, eaten_at)
             raise
         self._dispatch(job_id, "analyze")
         return self.response(job_id)
 
     @staticmethod
     def update_id(job_id):
-        return -int(job_id[:22], 16)  # Synthetic partition only; stable durable retry lookup.
+        return -int(hashlib.sha256(job_id.encode()).hexdigest()[:22], 16)  # Synthetic partition only; stable durable retry lookup.
 
     def _action(self, item):
         return self.service.find_action_for_update(self.identity, self.update_id(item["job_id"])) if item["mode"] == "log" else None
 
     def response(self, job_id):
         item = self.read(job_id)
-        result = {key: item[key] for key in ("job_id", "mode", "status", "created_at", "caption", "estimate", "model", "usage", "error", "recommendation", "recommendation_status") if key in item}
+        result = {key: item[key] for key in ("job_id", "mode", "status", "created_at", "caption", "estimate", "model", "usage", "error", "recommendation", "recommendation_status", "latency_ms") if key in item}
         action = self._action(item)
         if action:
             from .formatting import build_adjustment_keyboard, format_pending_message
@@ -182,15 +215,38 @@ class NutritionLab:
                 for row in build_adjustment_keyboard(action).inline_keyboard for button in row
                 if ":fix:" in (button.callback_data or "")
             ]
+        from .formatting import format_macro_message
+        from .models import MealEstimate
+        current_estimate = action.estimate if action else (MealEstimate.from_api_payload(item["estimate"]) if item.get("estimate") else None)
+        if current_estimate:
+            result.update(estimator_version=current_estimate.estimator_version,
+                          reconciliation_status=current_estimate.reconciliation_status,
+                          follow_up_question=current_estimate.follow_up_question,
+                          telegram_preview=format_macro_message(current_estimate))
+        if action and action.status == "confirmed":
+            result["daily_state"] = self.service.daily_nutrition_payload(self.identity)
+        recommendation = item.get("recommendation")
+        if recommendation:
+            result["recommendation_telegram_preview"] = (recommendation.get("error") or recommendation.get("reason") or
+                item.get("recommendation_telegram_preview", "Recommendation complete."))
         if item["status"] in {"queued", "running"} and epoch_seconds(self.repo._now()) - item["created_at"] > 180:
             result["status"] = "failed"
             result["error"] = "Analysis timed out. Any durable meal is shown below; submit a new image to retry."
         if item.get("recommendation_status") in {"queued", "running"} and epoch_seconds(self.repo._now()) - item.get("recommendation_started_at", 0) > 180:
             result["recommendation_status"] = "failed"
+            result["recommendation"] = {"error": "Recommendation timed out; the meal remains confirmed."}
+            result["recommendation_telegram_preview"] = result["recommendation"]["error"]
         return result
 
     def recent(self):
-        items = self.repo._query(Key("PK").eq(USER_PK) & Key("SK").begins_with("LAB_JOB#"))
+        items = []
+        kwargs = {"KeyConditionExpression": Key("PK").eq(JOB_PK) & Key("SK").begins_with("LAB_JOB#"), "ConsistentRead": True}
+        while True:
+            page = self.jobs.query(**kwargs)
+            items.extend(page.get("Items", []))
+            if not page.get("LastEvaluatedKey"):
+                break
+            kwargs["ExclusiveStartKey"] = page["LastEvaluatedKey"]
         live = sorted((item for item in items if item.get("expires_at", 0) > epoch_seconds(self.repo._now())),
                       key=lambda item: item["created_at"], reverse=True)[:10]
         return [self.response(item["job_id"]) for item in live]
@@ -206,18 +262,34 @@ class NutritionLab:
             self.service.apply_correction(self.identity, action.token, payload.get("type", ""), payload.get("value", ""))
         elif operation in {"confirm", "cancel"}:
             result = self.service.finalize_action(self.identity, action.token, operation)
-            if result.status == "confirmed" and self.service.should_recommend_after_meal(self.identity, result.meal.eaten_at):
-                # Persist confirmation before the independent recommendation job.
-                # Retries may redispatch; the worker's conditional claim deduplicates.
-                if not item.get("recommendation_status"):
-                    self.repo.table.update_item(
-                        Key=self._key(job_id),
-                        UpdateExpression="SET recommendation_status = :queued, recommendation_started_at = :now",
-                        ExpressionAttributeValues={":queued": "queued", ":now": epoch_seconds(self.repo._now())},
-                        ConditionExpression="attribute_not_exists(recommendation_status)",
-                    )
-                if self.read(job_id).get("recommendation_status") == "queued":
-                    self._dispatch(job_id, "recommend")
+            if result.status == "confirmed":
+                if not self.service.should_recommend_after_meal(self.identity, result.meal.eaten_at):
+                    self.jobs.update_item(Key=self._key(job_id),
+                        UpdateExpression="SET recommendation_status = :status, recommendation = :result",
+                        ExpressionAttributeValues={":status": "skipped", ":result": {"reason": "Past-date meal: current-day recommendation suppressed."}})
+                else:
+                    try:
+                        if not item.get("recommendation_status"):
+                            self.jobs.update_item(Key=self._key(job_id),
+                                UpdateExpression="SET recommendation_status = :queued, recommendation_started_at = :now",
+                                ExpressionAttributeValues={":queued": "queued", ":now": epoch_seconds(self.repo._now())},
+                                ConditionExpression="attribute_not_exists(recommendation_status)")
+                        if self.read(job_id).get("recommendation_status") == "queued":
+                            self._dispatch(job_id, "recommend")
+                    except Exception as err:
+                        if _is_conditional_failure(err):
+                            return self.response(job_id)
+                        try:
+                            self.jobs.update_item(Key=self._key(job_id),
+                                UpdateExpression="SET recommendation_status = :failed, recommendation = :result",
+                                ExpressionAttributeValues={":failed": "failed", ":queued": "queued", ":result": {"error": "Recommendation unavailable; the meal remains confirmed."}},
+                                ConditionExpression="recommendation_status = :queued")
+                        except Exception:
+                            pass  # Return durable confirmation even if job storage is unavailable.
+                        # Confirmation is already durable, even if dispatch/storage fails.
+                        response = self.response(job_id)
+                        response.update(recommendation_status="failed", recommendation={"error": "Recommendation unavailable; the meal remains confirmed."})
+                        return response
         else:
             raise ValueError("Unsupported Lab action.")
         return self.response(job_id)
@@ -238,15 +310,19 @@ class NutritionLab:
         try:
             image = self.s3.get_object(Bucket=os.environ["E2E_NUTRITION_LAB_BUCKET"], Key=item["image_key"])["Body"].read(MAX_IMAGE_BYTES + 1)
             validate_image(image)
+            if item.get("profile_revision") != self._profile_revision():
+                raise LabConflict("Account context changed; submit a new job.")
             estimation = await self.service.analyze_meal_image(self.identity, image, item["caption"], estimator=estimator)
             if item["mode"] == "log":
+                if item.get("profile_revision") != self._profile_revision():
+                    raise LabConflict("Account context changed during analysis.")
                 self.service.create_pending_meal(
                     self.identity, chat_id=0, request_message_id=0, caption=item["caption"],
-                    estimate=estimation.estimate, eaten_at=self.service.current_local_now_utc(self.identity),
+                    estimate=estimation.estimate, eaten_at=datetime.fromisoformat(item["eaten_at"]) if item.get("eaten_at") else self.service.current_local_now_utc(self.identity),
                     username=USERNAME, update_id=self.update_id(job_id),
                     model_metadata={"model": estimation.model, "usage": estimation.usage, "source": "e2e_nutrition_lab", "job_id": job_id},
                 )
-            item.update(status="complete", estimate=estimation.estimate.to_payload(), model=estimation.model, usage=estimation.usage)
+            item.update(status="complete", estimate=estimation.estimate.to_payload(), model=estimation.model, usage=estimation.usage, latency_ms=estimation.latency_ms)
         except Exception as err:
             # Do not store SDK errors: they may contain secrets, captions or image data.
             import logging
@@ -263,7 +339,7 @@ class NutritionLab:
         if action is None or action.status != "confirmed" or item.get("recommendation_status") != "queued":
             return
         try:
-            self.repo.table.update_item(
+            self.jobs.update_item(
                 Key=self._key(item["job_id"]),
                 UpdateExpression="SET recommendation_status = :running",
                 ConditionExpression="recommendation_status = :queued",
@@ -275,12 +351,15 @@ class NutritionLab:
             raise
         try:
             result, _prepared = await self.service.recommendation_async(self.identity)
+            from .formatting import format_recommendation_message
             payload, status = result.to_payload(), "complete"
+            preview = format_recommendation_message(result)
         except Exception:
             payload, status = {"error": "Recommendation unavailable; the meal remains confirmed."}, "failed"
-        self.repo.table.update_item(
+            preview = payload["error"]
+        self.jobs.update_item(
             Key=self._key(item["job_id"]),
-            UpdateExpression="SET recommendation_status = :status, recommendation = :result",
-            ExpressionAttributeValues=_to_storage({":status": status, ":result": payload, ":running": "running"}),
+            UpdateExpression="SET recommendation_status = :status, recommendation = :result, recommendation_telegram_preview = :preview",
+            ExpressionAttributeValues=_to_storage({":status": status, ":result": payload, ":preview": preview, ":running": "running"}),
             ConditionExpression="recommendation_status = :running",
         )

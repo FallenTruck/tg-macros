@@ -3,6 +3,7 @@ const initData = String(tg?.initData ?? "").trim();
 
 const HOME_VIEW = "home";
 const NUTRITION_VIEW = "nutrition";
+const LAB_VIEW = "nutrition-lab";
 const PROFILE_VIEW = "profile";
 const QUESTIONNAIRE_VIEW = "questionnaire";
 const WORKOUT_VIEW = "workout";
@@ -37,6 +38,7 @@ const state = {
   activeView: HOME_VIEW,
   workoutMode: WORKOUT_PROGRAMME_MODE,
   nutritionError: "",
+  labAuthorized: null,
 };
 
 const form = document.querySelector("#questionnaire-form");
@@ -201,6 +203,10 @@ saveButton.addEventListener("click", async () => {
     saveButton.disabled = false;
   }
 });
+
+let labEnabled = false;
+const labRoot = document.getElementById("nutrition-lab");
+const labApi = "/api/e2e/nutrition-lab/jobs";
 
 bootstrap();
 
@@ -465,6 +471,7 @@ function viewerInitialValue(viewer) {
 
 function normalizeRoute(hash = window.location.hash) {
   const route = String(hash || "").replace(/^#/, "").trim().toLowerCase();
+  if (route === LAB_VIEW && state.labAuthorized !== false) return LAB_VIEW;
   if (route === NUTRITION_VIEW || route === PROFILE_VIEW || route === QUESTIONNAIRE_VIEW || route === WORKOUT_VIEW) {
     return route;
   }
@@ -472,7 +479,7 @@ function normalizeRoute(hash = window.location.hash) {
 }
 
 function navigateTo(view) {
-  const route = view === NUTRITION_VIEW || view === QUESTIONNAIRE_VIEW || view === PROFILE_VIEW || view === WORKOUT_VIEW ? view : HOME_VIEW;
+  const route = view === LAB_VIEW || view === NUTRITION_VIEW || view === QUESTIONNAIRE_VIEW || view === PROFILE_VIEW || view === WORKOUT_VIEW ? view : HOME_VIEW;
   const targetHash = `#${route}`;
   if (window.location.hash === targetHash) {
     renderRoute(route);
@@ -498,6 +505,7 @@ function renderRoute(route) {
   profileView.hidden = route !== PROFILE_VIEW;
   questionnaireView.hidden = route !== QUESTIONNAIRE_VIEW;
   workoutView.hidden = route !== WORKOUT_VIEW;
+  labRoot.hidden = route !== LAB_VIEW || state.labAuthorized !== true;
 
   for (const button of navButtons) {
     const buttonRoute = button.dataset.route || HOME_VIEW;
@@ -1425,9 +1433,7 @@ let labTimer = null;
 let labPreviewUrl = null;
 let labRequestId = null;
 let labCurrentJob = null;
-let labEnabled = false;
-const labRoot = document.getElementById("nutrition-lab");
-const labApi = "/api/e2e/nutrition-lab/jobs";
+
 
 function clearNutritionLab() {
   labEnabled = false;
@@ -1442,29 +1448,30 @@ function clearNutritionLab() {
 
 async function initializeNutritionLab(allowed) {
   clearNutritionLab();
-  if (!allowed || state.authMode !== "browser") return;
+  state.labAuthorized = allowed && state.authMode === "browser";
+  if (!state.labAuthorized) { syncRoute(); return; }
   labEnabled = true;
-  labRoot.hidden = false;
   labRoot.innerHTML = `
     <p class="eyebrow">Development · javaan-e2e only</p>
     <h2>E2E Nutrition Lab</h2>
     <p>Evaluate real meal photos with the production nutrition pipeline.</p>
     <form id="lab-upload-form" data-testid="lab-upload-form">
       <label>Meal image (JPEG, PNG or WebP, up to 3 MB)
-        <input id="lab-image" type="file" accept="image/jpeg,image/png,image/webp" required data-testid="lab-image">
+        <input id="lab-image" type="file" accept="image/jpeg,image/png,image/webp" required data-testid="nutrition-lab-file">
       </label>
       <img id="lab-preview" alt="Selected meal photo" hidden>
-      <label>Optional caption<textarea id="lab-caption" maxlength="1000" rows="2" data-testid="lab-caption"></textarea></label>
-      <label>Mode<select id="lab-mode" data-testid="lab-mode">
-        <option value="estimate">Estimate-only · no meal or action</option>
-        <option value="log">Full synthetic log · correction and confirmation</option>
+      <label>Optional caption<textarea id="lab-caption" maxlength="1000" rows="2" data-testid="nutrition-lab-caption"></textarea></label>
+      <label>Mode<select id="lab-mode" data-testid="nutrition-lab-mode">
+        <option value="estimate" data-testid="nutrition-lab-mode-estimate">Estimate-only · no meal or action</option>
+        <option value="log" data-testid="nutrition-lab-mode-full">Full synthetic log · correction and confirmation</option>
       </select></label>
+      <label>Optional meal time (saved profile timezone)<input id="lab-eaten-at" type="datetime-local" data-testid="nutrition-lab-eaten-at"></label>
       <p>Full logs use the existing confirmation timeout and may log automatically after it expires. All writes belong to the isolated test account.</p>
-      <button type="submit" id="lab-submit" data-testid="lab-submit">Analyze image</button>
+      <button type="submit" id="lab-submit" data-testid="nutrition-lab-run">Analyze image</button>
     </form>
     <p id="lab-status" role="status" aria-live="polite" data-testid="lab-status"></p>
     <label>Recent runs (24 hours)<select id="lab-recent" data-testid="lab-recent"><option value="">Select a run</option></select></label>
-    <div id="lab-result" data-testid="lab-result"></div>`;
+    <div id="lab-result" data-testid="nutrition-lab-result"></div>`;
   document.getElementById("lab-upload-form").addEventListener("submit", submitLabImage);
   document.getElementById("lab-upload-form").addEventListener("input", () => { labRequestId = null; });
   document.getElementById("lab-image").addEventListener("change", event => {
@@ -1488,6 +1495,7 @@ async function initializeNutritionLab(allowed) {
     for (const job of jobs) addLabRecent(job);
     if (jobs.length) renderLabJob(jobs[0]);
   } catch (error) { labStatus(error.message); }
+  syncRoute();
 }
 
 function labStatus(message) {
@@ -1523,7 +1531,7 @@ async function submitLabImage(event) {
       reader.onerror = () => reject(new Error("Could not read the image."));
       reader.readAsDataURL(file);
     });
-    const job = await apiFetch(`${labApi}/${requestId}`, {method: "PUT", body: JSON.stringify({image_base64: imageBase64, caption, mode})});
+    const job = await apiFetch(`${labApi}/${requestId}`, {method: "PUT", body: JSON.stringify({image_base64: imageBase64, caption, mode, eaten_at: mode === "log" ? document.getElementById("lab-eaten-at").value || null : null})});
     if (!labEnabled) return;
     labRequestId = null;
     addLabRecent(job);
@@ -1544,23 +1552,38 @@ function renderLabJob(job) {
   if (job.action) {
     const message = document.createElement("pre");
     message.textContent = job.action.message;
+    const previewTitle = document.createElement("h3");
+    previewTitle.textContent = "Telegram Preview";
+    result.append(previewTitle);
+    // The production formatter owns this preview.
+    message.dataset.testid = "nutrition-lab-telegram-preview";
     result.append(message);
     if (job.action.status === "pending") {
       const controls = document.createElement("div");
       controls.className = "lab-actions";
+      const adjust = document.createElement("button");
+      adjust.type = "button";
+      adjust.textContent = "Adjust";
+      adjust.dataset.testid = "nutrition-lab-adjust";
+      const corrections = document.createElement("div");
+      corrections.className = "lab-actions";
+      corrections.hidden = true;
+      adjust.addEventListener("click", () => { corrections.hidden = !corrections.hidden; });
+      controls.append(adjust);
       for (const correction of job.corrections || []) {
         const button = document.createElement("button");
         button.type = "button";
         button.textContent = correction.label;
         button.dataset.testid = `lab-correct-${correction.type}-${correction.value}`;
         button.addEventListener("click", () => mutateLabJob("correct", {type: correction.type, value: correction.value}));
-        controls.append(button);
+        corrections.append(button);
       }
+      controls.append(corrections);
       for (const operation of ["confirm", "cancel"]) {
         const button = document.createElement("button");
         button.type = "button";
         button.textContent = operation === "confirm" ? "Confirm synthetic meal" : "Cancel synthetic meal";
-        button.dataset.testid = `lab-${operation}`;
+        button.dataset.testid = `nutrition-lab-${operation}`;
         button.addEventListener("click", () => mutateLabJob(operation));
         controls.append(button);
       }
@@ -1568,6 +1591,30 @@ function renderLabJob(job) {
     }
   }
   if (job.estimate || job.action) {
+    const estimate = job.action?.estimate || job.estimate;
+    const addText = (heading, content, testid) => {
+      const section = document.createElement("section");
+      const title = document.createElement("h3");
+      title.textContent = heading;
+      const text = document.createElement("pre");
+      if (testid) text.dataset.testid = testid;
+      text.textContent = content;
+      section.append(title, text);
+      result.append(section);
+    };
+    const total = estimate.total_best || estimate;
+    addText("Estimate", `${estimate.meal_name}\n${job.estimator_version} / ${job.model}\n${total.calories} kcal · P ${total.protein_g}g · C ${total.carbs_g}g · F ${total.fat_g}g\nRange: ${estimate.total_low?.calories ?? "unknown"}–${estimate.total_high?.calories ?? "unknown"} kcal\nReconciliation: ${estimate.reconciliation_status}\nFollow-up: ${estimate.follow_up_question || "None"}\nAnalysis time: ${job.latency_ms ?? "unknown"} ms`);
+    addText("Items", (estimate.items || []).map(item => `${item.name}: ~${item.portion_g}g (${item.portion_low_g ?? "?"}–${item.portion_high_g ?? "?"}g) · ${item.calories} kcal · ${item.evidence}\n${item.assumptions || ""}`).join("\n\n"));
+    addText("Assumptions and confidence", JSON.stringify({assumptions: (estimate.items || []).map(item => ({name: item.name, categories: item.assumption_categories})), identification: estimate.identification_confidence, portion: estimate.portion_confidence, macros: estimate.macro_confidence}, null, 2));
+    if (!job.action) addText("Telegram Preview", job.telegram_preview || "Unavailable", "nutrition-lab-telegram-preview");
+    if (job.action?.status === "confirmed") {
+      addText("Confirmed meal", `${job.action.meal_id} · confirmed`);
+      if (job.daily_state) addText("Current daily totals", JSON.stringify(job.daily_state.consumed, null, 2), "nutrition-lab-daily-totals");
+    }
+    if (job.recommendation || job.recommendation_status) {
+      addText("Recommendation", JSON.stringify(job.recommendation || {status: job.recommendation_status}, null, 2), "nutrition-lab-recommendation");
+      if (job.recommendation_telegram_preview) addText("Recommendation Telegram Preview", job.recommendation_telegram_preview, "nutrition-lab-recommendation-preview");
+    }
     const title = document.createElement("h3");
     title.textContent = "Structured result";
     const pre = document.createElement("pre");

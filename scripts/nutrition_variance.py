@@ -39,7 +39,7 @@ def open_ready_lab(page):
     page.get_by_test_id("bottom-navigation").wait_for(state="visible", timeout=30_000)
     page.locator("#app-shell").wait_for(state="visible", timeout=30_000)
     page.locator("#status-panel").wait_for(state="hidden", timeout=30_000)
-    page.get_by_test_id("nav-nutrition").click()
+    page.evaluate("location.hash = 'nutrition-lab'")
     page.get_by_test_id("nutrition-lab").wait_for(state="visible", timeout=30_000)
 
 
@@ -54,8 +54,7 @@ def run_live(db, cases, *, manifest, repeats, variants):
     username, password = load_e2e_credentials(session)
 
     def domain_snapshot():
-        return sorted((_from_storage(item) for item in user_partition_items(table, "e2e-javaan-e2e")
-                       if not item["SK"].startswith("LAB_JOB#")), key=lambda item: item["SK"])
+        return sorted((_from_storage(item) for item in user_partition_items(table, "e2e-javaan-e2e")), key=lambda item: item["SK"])
 
     before = domain_snapshot()
     # Store the hash, not profile/auth data. It separates changed correction-prior contexts.
@@ -84,14 +83,14 @@ def run_live(db, cases, *, manifest, repeats, variants):
                             try:
                                 if digest(image_path(case, manifest).read_bytes()) != case["image_sha256"]:
                                     raise ValueError("Fixture changed during run")
-                                page.get_by_test_id("lab-image").set_input_files(str(image_path(case, manifest)))
-                                page.get_by_test_id("lab-caption").fill(caption_for(case, variant))
-                                page.get_by_test_id("lab-mode").select_option("estimate")
+                                page.get_by_test_id("nutrition-lab-file").set_input_files(str(image_path(case, manifest)))
+                                page.get_by_test_id("nutrition-lab-caption").fill(caption_for(case, variant))
+                                page.get_by_test_id("nutrition-lab-mode").select_option("estimate")
                                 with page.expect_response(lambda response:
                                     response.request.method == "PUT" and
                                     response.url.startswith(base_url + "/api/e2e/nutrition-lab/jobs/"),
                                     timeout=45_000) as submitted:
-                                    page.get_by_test_id("lab-submit").click()
+                                    page.get_by_test_id("nutrition-lab-run").click()
                                 if submitted.value.status != 202:
                                     raise RuntimeError("Lab upload failed")
                                 job_id = submitted.value.json()["job_id"]

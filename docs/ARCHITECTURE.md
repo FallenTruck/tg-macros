@@ -247,9 +247,13 @@ is generated build output and is ignored by Git.
 
 The gated browser E2E adapter submits temporary image-analysis jobs to a private
 S3 bucket and a dedicated asynchronous Lambda. The API returns quickly and the
-browser polls its isolated `USER#e2e-javaan-e2e / LAB_JOB#<id>` result. Both this
+browser polls its isolated `LAB#javaan-e2e / LAB_JOB#<id>` result in the
+dev-only `NutritionLabJobs` table. Temporary evaluation state never enters the
+retained nutrition table. Full logs alone write durable E2E nutrition records. Both this
 adapter and Telegram call `NutritionService.analyze_meal_image`, which supplies
-user-scoped correction priors to the unchanged DirectOpenAIEstimator. Production
+user-scoped correction priors to DirectOpenAIEstimator. Its common validator
+unconditionally stamps the application version; its result includes measured
+analysis latency. Production
 pending actions, corrections, finalization, and daily-summary reads are shared.
 Recommendation adapters bind their reads to the supplied canonical identity,
 including synthetic identities without a Telegram account. No synthetic

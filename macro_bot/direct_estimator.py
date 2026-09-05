@@ -174,6 +174,7 @@ class EstimationResult:
     estimate: MealEstimate
     model: str
     usage: dict[str, Any]
+    latency_ms: int | None = None
 
 
 def downscale_for_vision(image_bytes: bytes, max_side: int = VISION_MAX_SIDE, quality: int = 80) -> bytes:
@@ -400,7 +401,7 @@ def validate_result(result: dict[str, Any]) -> dict[str, Any]:
     result["fat_g"] = round(float(result["total_best"]["fat_g"]), 1)
     result["confidence"] = confidence
     result["notes"] = str(result.get("notes", ""))
-    result["estimator_version"] = str(result.get("estimator_version", ESTIMATOR_APPLICATION_VERSION) or ESTIMATOR_APPLICATION_VERSION)
+    result["estimator_version"] = ESTIMATOR_APPLICATION_VERSION
     for confidence_name in ("identification_confidence", "portion_confidence", "macro_confidence"):
         confidence_value = result.get(confidence_name)
         if confidence_value is not None:
@@ -492,6 +493,7 @@ class DirectOpenAIEstimator:
         )
 
     async def estimate(self, image_bytes: bytes, caption: str = "", persona_hint: str = "") -> EstimationResult:
+        analysis_started = time.monotonic()
         if not image_bytes:
             raise DirectEstimationError("Empty image", retryable=False)
         if len(image_bytes) > MAX_UPLOAD_BYTES:
@@ -583,5 +585,6 @@ class DirectOpenAIEstimator:
                 estimate=MealEstimate.from_api_payload(validated),
                 model=self._model,
                 usage={**_extract_usage(response), "estimator_version": ESTIMATOR_APPLICATION_VERSION},
+                latency_ms=round((time.monotonic() - analysis_started) * 1000),
             )
         raise DirectEstimationError(f"OpenAI estimation failed: {str(last_error)[:120]}")

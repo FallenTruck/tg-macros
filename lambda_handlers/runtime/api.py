@@ -745,6 +745,8 @@ def _nutrition_lab(request: Request, service=None):
     from macro_bot.nutrition_lab import NutritionLab, LabUnavailable, enabled, require_identity
     if not enabled() or request.headers.get("x-telegram-init-data", "").strip():
         raise HTTPException(404, "Nutrition Lab unavailable.")
+    if request.query_params:
+        raise HTTPException(400, "Nutrition Lab does not accept query parameters.")
     service = service or _service()
     identity = _browser_session_identity(request, service)
     try:
@@ -791,10 +793,10 @@ async def lab_submit(job_id: str, request: Request):
             raise HTTPException(413, "Choose an image of at most 3 MB.")
     try:
         payload = json.loads(body)
-        if not isinstance(payload, dict) or set(payload) - {"image_base64", "caption", "mode"}:
+        if not isinstance(payload, dict) or set(payload) - {"image_base64", "caption", "mode", "eaten_at"}:
             raise ValueError("Invalid Lab upload fields.")
         image = base64.b64decode(payload.get("image_base64", ""), validate=True)
-        result = await run_in_threadpool(lab.submit, job_id, image, payload.get("caption", ""), payload.get("mode", "estimate"))
+        result = await run_in_threadpool(lab.submit, job_id, image, payload.get("caption", ""), payload.get("mode", "estimate"), payload.get("eaten_at"))
         return _no_store(result, 202)
     except (binascii.Error, TypeError, UnicodeError) as err:
         raise HTTPException(400, "Invalid image encoding.") from err

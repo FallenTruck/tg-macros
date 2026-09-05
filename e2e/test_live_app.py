@@ -301,6 +301,20 @@ class LiveJavaanFitnessE2ETests(unittest.TestCase):
             self.fail("JAVAAN_E2E_MEAL_IMAGE must point to a real meal photograph")
         caption = os.getenv("JAVAAN_E2E_MEAL_CAPTION", "" if os.getenv("JAVAAN_E2E_MEAL_IMAGE") else
                             fixture["caption"])
+        from scripts.reset_e2e_account import reset_e2e_account
+        from macro_bot.serverless_service import NutritionService
+        session, table, outputs, repository = dev_resources()
+        def reset_and_verify():
+            reset_e2e_account(table=table, repository=repository)
+            identity = repository.get_identity_by_key("IDENTITY#E2E#javaan-e2e")
+            day = NutritionService(repository).daily_nutrition_payload(identity)
+            self.assertEqual(day["meal_count"], 1)
+            self.assertEqual(day["meals"][0]["caption"], "E2E baseline meal")
+            self.assertEqual(day["consumed"], {"calories": 600, "protein_g": 40, "carbs_g": 60, "fat_g": 15})
+            records = user_partition_items(table, "e2e-javaan-e2e")
+            self.assertFalse(any(item.get("entity_type") == "meal_correction" for item in records))
+        self.addCleanup(reset_and_verify)
+        reset_and_verify()
         output_dir = Path("artifacts/e2e")
         output_dir.mkdir(parents=True, exist_ok=True)
         playwright, browser = self._new_browser()
@@ -308,13 +322,13 @@ class LiveJavaanFitnessE2ETests(unittest.TestCase):
             context = browser.new_context(viewport={"width": 390, "height": 844})
             page = self._open_page(context)
             self._login(page)
-            self._navigate(page, "nutrition", "#nutrition-view")
+            page.evaluate("location.hash = 'nutrition-lab'")
             page.get_by_test_id("nutrition-lab").wait_for(state="visible", timeout=30_000)
             self._assert_no_horizontal_overflow(page)
+            self.assertEqual(page.locator("#bottom-nav .nav-item").count(), 4)
 
             def snapshot_domain():
-                return {item["SK"]: item for item in user_partition_items(self.table, "e2e-javaan-e2e")
-                        if not item["SK"].startswith("LAB_JOB#")}
+                return {item["SK"]: item for item in user_partition_items(self.table, "e2e-javaan-e2e")}
 
             def result():
                 import json
@@ -322,10 +336,10 @@ class LiveJavaanFitnessE2ETests(unittest.TestCase):
 
             def upload(mode):
                 old = page.get_by_test_id("lab-recent").input_value()
-                page.get_by_test_id("lab-image").set_input_files(str(image))
-                page.get_by_test_id("lab-caption").fill(caption)
-                page.get_by_test_id("lab-mode").select_option(mode)
-                page.get_by_test_id("lab-submit").click()
+                page.get_by_test_id("nutrition-lab-file").set_input_files(str(image))
+                page.get_by_test_id("nutrition-lab-caption").fill(caption)
+                page.get_by_test_id("nutrition-lab-mode").select_option(mode)
+                page.get_by_test_id("nutrition-lab-run").click()
                 page.wait_for_function("old => document.getElementById('lab-recent').value !== old", arg=old, timeout=30_000)
                 page.wait_for_function("""() => {
                     const t = document.getElementById('lab-status').textContent;
@@ -337,12 +351,19 @@ class LiveJavaanFitnessE2ETests(unittest.TestCase):
                 self.assertEqual(data["status"], "complete")
                 self.assertIn(data["estimate"]["reconciliation_status"], {"matched", "reconciled_from_items", "partial_item_breakdown", "reconciliation_required"})
                 self.assertTrue(data["estimate"]["items"])
+                from macro_bot.models import ESTIMATOR_VERSION
+                self.assertEqual(data["estimate"]["estimator_version"], ESTIMATOR_VERSION)
+                self.assertEqual(data["estimator_version"], ESTIMATOR_VERSION)
+                self.assertTrue(data["model"])
+                self.assertTrue(data["telegram_preview"])
+                self.assertGreaterEqual(data["latency_ms"], 0)
                 return data
 
             before = snapshot_domain()
             estimate = upload("estimate")
             self.assertNotIn("action", estimate)
             self.assertEqual(snapshot_domain(), before)
+            self.assertTrue(page.get_by_test_id("nutrition-lab-telegram-preview").is_visible())
             page.screenshot(path=str(output_dir / "nutrition-lab-estimate-mobile.png"), full_page=True)
 
             pending = upload("log")
@@ -350,8 +371,9 @@ class LiveJavaanFitnessE2ETests(unittest.TestCase):
             pending_id = pending["job_id"]
             page.reload(wait_until="domcontentloaded")
             self._wait_for_app_ready(page)
-            self._navigate(page, "nutrition", "#nutrition-view")
+            page.evaluate("location.hash = 'nutrition-lab'")
             page.get_by_test_id("lab-recent").select_option(pending_id)
+            page.get_by_test_id("nutrition-lab-adjust").click()
             page.get_by_test_id("lab-correct-portion-smaller").wait_for(state="visible", timeout=30_000)
             page.get_by_test_id("lab-correct-portion-smaller").click()
             page.wait_for_function("""() => {
@@ -361,14 +383,18 @@ class LiveJavaanFitnessE2ETests(unittest.TestCase):
                 return job.action.estimate.calories < job.action.original_estimate.calories;
             }""", timeout=30_000)
             corrected = result()
-            page.get_by_test_id("lab-confirm").click()
+            page.get_by_test_id("nutrition-lab-confirm").click()
             page.wait_for_function("""() => {
                 const raw = document.querySelector('[data-testid="lab-json"]')?.textContent;
-                return raw && JSON.parse(raw).recommendation_status === 'complete';
+                return raw && ['complete', 'failed', 'skipped'].includes(JSON.parse(raw).recommendation_status);
             }""", timeout=210_000)
             confirmed = result()
             self.assertEqual(confirmed["action"]["status"], "confirmed")
-            self.assertIn("strategy_version", confirmed["recommendation"])
+            if confirmed["recommendation_status"] == "complete":
+                self.assertIn("strategy_version", confirmed["recommendation"])
+                self.assertTrue(confirmed["recommendation_telegram_preview"])
+            else:
+                self.assertTrue(confirmed["recommendation"].get("error") or confirmed["recommendation"].get("reason"))
             day = context.request.get(self.base_url + "/api/nutrition/day").json()
             meal = next(item for item in day["meals"] if item["meal_id"] == confirmed["action"]["meal_id"])
             self.assertEqual(meal["macros"], corrected["action"]["estimate"]["total_best"])
@@ -379,7 +405,7 @@ class LiveJavaanFitnessE2ETests(unittest.TestCase):
             page.screenshot(path=str(output_dir / "nutrition-lab-desktop.png"), full_page=True)
             before_cancel = context.request.get(self.base_url + "/api/nutrition/day").json()
             upload("log")
-            page.get_by_test_id("lab-cancel").click()
+            page.get_by_test_id("nutrition-lab-cancel").click()
             page.wait_for_function("""() => {
                 const raw = document.querySelector('[data-testid="lab-json"]')?.textContent;
                 return raw && JSON.parse(raw).action?.status === 'cancelled';

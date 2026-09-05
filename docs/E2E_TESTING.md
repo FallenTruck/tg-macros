@@ -161,8 +161,11 @@ performing broad machine troubleshooting.
 
 ## E2E Nutrition Lab
 
-The Nutrition tab exposes **E2E Nutrition Lab** only to the validated
-`javaan-e2e` browser session. This is an evaluation and regression surface.
+The hidden `#nutrition-lab` route exposes **E2E Nutrition Lab** only to the validated
+`javaan-e2e` browser session. Open the deployed Mini App URL with `#nutrition-lab`
+after login (direct links also survive login). It is absent from the four-item
+bottom navigation and normal Nutrition history. Unauthorized sessions redirect
+to Home. This is an evaluation and regression surface.
 Normal browser users, Telegram launch sessions, and unauthenticated callers
 cannot access any Lab endpoint. Hiding the controls is not the security boundary:
 every endpoint and asynchronous worker validates the canonical E2E marker,
@@ -182,8 +185,10 @@ validation, and reconciliation. The browser does not infer nutrition or resize
 images. The smaller upload cap leaves room for JSON/base64 in the API invocation.
 
 - **Estimate-only:** shows structured estimate, item evidence, uncertainty,
-  reconciliation, model and usage. It creates only a temporary `LAB_JOB#` result;
-  it never creates a meal, action, correction, or daily nutrition change.
+  reconciliation, model and usage. It creates a temporary result only in the separate dev-only `NutritionLabJobs`
+  table (`LAB#javaan-e2e` partition). It makes **zero writes to FitnessDataTable**,
+  including the entire E2E user partition; no meal, action, correction, workflow,
+  recommendation or daily-history record is created.
 - **Full synthetic log:** creates the production pending meal/action/detail
   records, exposes the production contextual corrections, and allows confirm or
   cancel. Confirmation updates the daily read model and starts the same
@@ -196,7 +201,8 @@ The Lab uses an asynchronous Lambda job so an estimate does not race the HTTP
 API timeout. The private encrypted `NutritionLabImages` bucket holds uploaded
 bytes only during processing; the worker deletes the object on success or
 failure, with a one-day S3 lifecycle fallback for interruption/orphan uploads.
-Jobs and structured evaluation results have a 24-hour DynamoDB TTL and are
+Jobs and structured evaluation results in the separate ephemeral table have a
+24-hour DynamoDB TTL and are
 hidden after expiry. Durable meals and correction feedback retain the production
 retention rules. Neither raw image bytes nor credentials enter DynamoDB jobs,
 logs, screenshots, or result downloads. The user-selected photo can appear in
@@ -210,22 +216,43 @@ After a worker interruption, polling terminates after three minutes and exposes
 any already durable action. Run a new job to retry estimation. Corrections are
 never automatically replayed after a lost HTTP response; inspect the refreshed
 result before applying another correction. Confirm/cancel retain production
-idempotency. The reset command already deletes Lab jobs in the exact test user
-partition; temporary image objects expire independently.
+idempotency. The reset command restores only the exact test user partition and rotates an
+E2E profile reset revision. Queued/in-flight analysis checks that revision before
+creating a pending meal and rejects a changed revision. Run reset and full-log
+scenarios sequentially; do not reset while another tester is submitting meals.
+Ephemeral jobs and images expire independently; legacy Lab jobs in the user
+partition are removed by the existing reset. The persistent local corpus database
+is independent of both reset and TTL.
 
 API routes (all require the gated browser session; writes also require the
 configured same-origin check):
 
 - `GET /api/e2e/nutrition-lab/jobs` — recent runs
 - `PUT /api/e2e/nutrition-lab/jobs/{32-hex-request-id}` — JSON with `image_base64`,
-  `caption`, and `mode` (`estimate` or `log`), returning 202
+  `caption`, and `mode` (`estimate` or `log`), returning 202. Full logs may also
+  provide `eaten_at`: an ISO instant or a local date/time interpreted in the saved
+  profile timezone. No client timezone field is accepted. Past local dates
+  suppress current-day recommendations after confirmation
 - `GET /api/e2e/nutrition-lab/jobs/{id}` — structured status/result and current action
 - `POST /api/e2e/nutrition-lab/jobs/{id}/correct` — `type` and `value` from the
   returned correction choices
 - `POST /api/e2e/nutrition-lab/jobs/{id}/confirm` or `/cancel` — empty JSON body
 
 Client-supplied user ids, action tokens, estimator/model overrides, image URLs,
-and partition keys are not accepted.
+and partition keys are not accepted. Lab routes reject query parameters.
+
+Machine-readable results contain the complete `MealEstimate`, application-stamped
+`estimator_version`, model/usage, reconciliation, follow-up, real `latency_ms`,
+and the production `telegram_preview`. A pending action retains its original
+estimate and exposes the current corrected estimate. Confirmed responses include
+`daily_state`, recommendation status/payload and the production recommendation
+preview (or a clear fallback). Model-provided version strings are unconditionally
+overwritten in the common estimator validator. The UI displays totals/ranges,
+items, assumptions/confidence, previews and downloadable JSON.
+
+The Adjust button reveals production-provided base, skin, sauce/oil and whole
+portion controls when applicable. Corrections update the result and preview.
+Recommendation dispatch or generation failure never rolls back confirmation.
 
 Run offline boundary and browser tests:
 
@@ -236,7 +263,8 @@ Run offline boundary and browser tests:
 
 The offline browser test uploads the real repository image while stubbing cloud
 services and the OpenAI response. It proves browser integration, not model
-accuracy. The explicit live target resets the synthetic account and makes three
+accuracy. The explicit live test resets and verifies the synthetic baseline before and
+in cleanup after the scenario, even on assertion failure. It makes three
 real image/model calls for estimate-only, corrected confirmation/recommendation,
 and cancellation:
 
@@ -249,7 +277,8 @@ optionally set `JAVAAN_E2E_MEAL_CAPTION`. A custom image defaults to no caption.
 The default is `images/6143401176322477320.jpg`. The live test verifies zero
 estimate-only domain writes, durable refresh, corrected daily macros,
 recommendation completion, cancellation without consumption changes, responsive
-layout, and logged-out denial. It produces `nutrition-lab-estimate-mobile.png`,
+layout, and logged-out denial. It verifies the exact application version, model, latency,
+production preview and an unchanged entire user partition for estimate-only. It produces `nutrition-lab-estimate-mobile.png`,
 `nutrition-lab-confirmed-mobile.png`, and `nutrition-lab-desktop.png` in ignored
 `artifacts/e2e/`, alongside `nutrition-lab-live-results.json` containing the
 three structured run results. Tests assert pipeline behavior and structure, not nutritional
@@ -269,3 +298,28 @@ for the seven initial foods, image attribution, label rules, and historical
 results. `JAVAAN_E2E_CASE` selects a registry fixture for the existing full-flow
 smoke. The default breakfast caption now uses the user-confirmed **mac and
 cheese** label.
+
+### Authorized private Telegram fixtures
+
+Use retained Telegram meal references only when the user explicitly authorizes
+specific accounts. For the authorized Pooja/Vaanavan corpus:
+
+```bash
+AWS_PROFILE=fitness-dev AWS_REGION=ap-southeast-1 \
+  .venv/bin/python scripts/import_private_nutrition_photos.py \
+  --account pooja --account vaanavan --limit 4
+.venv/bin/python scripts/nutrition_variance.py \
+  --manifest artifacts/nutrition/private/manifest.json
+```
+
+The importer reads only identities and the selected accounts' retained meal
+references, uses Telegram file download APIs, and writes no real-user records or
+Telegram messages. It does not read unrelated chat history or poll bot updates.
+Photos, original captions, reference hashes and private manifests remain under
+ignored `artifacts/nutrition/private/`. No bot token, session state or raw file ID
+is stored in the manifest. The combined private manifest can be selected with
+`--manifest` for repeated Lab tests; `--case` selects individual cases. All model
+calls and synthetic logs still run as `javaan-e2e`, never as the source account.
+Review each imported image and tag shared plates, occluded food, screenshots,
+product photos and alternate framing appropriately. Source captions and visual
+observations are not weighed nutrition labels. Do not publish private fixtures.

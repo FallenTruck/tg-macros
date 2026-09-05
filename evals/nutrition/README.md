@@ -63,7 +63,8 @@ The live runner signs into `javaan-e2e`, uploads each photo through the actual
 Nutrition Lab form, selects **estimate-only**, and waits for its structured job
 result. It never clicks correction, confirm, or cancel. It validates the existing
 dev stack and E2E marker/identity/credential mapping before login and compares
-the synthetic user partition before and after, excluding only `LAB_JOB#` records.
+the entire synthetic user partition before and after, without exclusions.
+Temporary jobs live in a separate dev-only table.
 It does not reset the account. A domain change invalidates the batch's context.
 Browser sessions stay in memory and are logged out on normal completion; no
 credentials, cookies, traces, HARs, or login screenshots enter the database.
@@ -119,7 +120,15 @@ The durable-flow smoke test can also select a fixture:
 JAVAAN_E2E_CASE=mac-and-cheese-001 make e2e-nutrition-lab
 ```
 
-Unlike the variance runner, this smoke command resets the E2E account and
-exercises log/correction/confirm/cancel. Both browser tests read the default
+Unlike the variance runner, this smoke command resets/verifies the E2E baseline
+before and after log/correction/confirm/cancel. Both browser tests read the default
 breakfast label from the registry, so the mac-and-cheese correction stays in one
 place.
+
+Private photos explicitly authorized by the user can be imported with
+`scripts/import_private_nutrition_photos.py`; see the private-fixture workflow in
+[the E2E guide](../../docs/E2E_TESTING.md). The private combined manifest and
+photos remain ignored under `artifacts/nutrition/private/`. Use `--manifest` to
+include them. Original captions are preserved, and visual review tags distinguish
+shared plates, packaging, product photos and screenshot/framing variants. These
+references add realistic coverage but still do not establish macro accuracy.

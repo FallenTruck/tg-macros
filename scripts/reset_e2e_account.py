@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import argparse
 import sys
+import uuid
 from datetime import datetime, time, timedelta, timezone
 from pathlib import Path
 from typing import Any
@@ -72,6 +73,10 @@ def reset_e2e_account(*, table: Any, repository: DynamoNutritionRepository) -> i
     deleted = delete_user_partition(table, E2E_USER_ID)
     service = NutritionService(repository)
     service.save_profile(identity, dict(BASELINE_PROFILE_PAYLOAD))
+    # Invalidates queued/in-flight Lab jobs without touching their ephemeral table.
+    table.update_item(Key={"PK": f"USER#{E2E_USER_ID}", "SK": "PROFILE"},
+                      UpdateExpression="SET e2e_reset_revision = :revision",
+                      ExpressionAttributeValues={":revision": uuid.uuid4().hex})
     timezone_name = BASELINE_PROFILE_PAYLOAD["timezone"]
     timezone_info = ZoneInfo(timezone_name)
     local_now = repository._now().astimezone(timezone_info)

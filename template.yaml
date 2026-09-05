@@ -49,6 +49,20 @@ Conditions:
     - !Equals [!Ref EnableE2ENutritionLab, 'true']
 
 Resources:
+  NutritionLabJobs:
+    Type: AWS::DynamoDB::Table
+    Condition: NutritionLabEnabled
+    Properties:
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - {AttributeName: PK, AttributeType: S}
+        - {AttributeName: SK, AttributeType: S}
+      KeySchema:
+        - {AttributeName: PK, KeyType: HASH}
+        - {AttributeName: SK, KeyType: RANGE}
+      TimeToLiveSpecification: {AttributeName: expires_at, Enabled: true}
+      SSESpecification: {SSEEnabled: true}
+
   NutritionLabImages:
     Type: AWS::S3::Bucket
     Condition: NutritionLabEnabled
@@ -82,6 +96,7 @@ Resources:
         Variables:
           STACK_NAME: !Ref 'AWS::StackName'
           E2E_NUTRITION_LAB_ENABLED: 'true'
+          E2E_NUTRITION_LAB_JOBS_TABLE: !Ref NutritionLabJobs
           E2E_NUTRITION_LAB_BUCKET: !Ref NutritionLabImages
       EventInvokeConfig:
         MaximumEventAgeInSeconds: 60
@@ -106,6 +121,12 @@ Resources:
               Condition:
                 ForAllValues:StringEquals:
                   dynamodb:LeadingKeys: [USER#e2e-javaan-e2e]
+            - Effect: Allow
+              Action: [dynamodb:GetItem, dynamodb:Query, dynamodb:PutItem, dynamodb:UpdateItem]
+              Resource: !GetAtt NutritionLabJobs.Arn
+              Condition:
+                ForAllValues:StringEquals:
+                  dynamodb:LeadingKeys: [LAB#javaan-e2e]
             - Effect: Allow
               Action: [s3:GetObject, s3:DeleteObject]
               Resource: !Sub '${NutritionLabImages.Arn}/nutrition-lab/*'
@@ -236,6 +257,7 @@ Resources:
           STACK_NAME: !Ref 'AWS::StackName'
           E2E_NUTRITION_LAB_ENABLED: !If [NutritionLabEnabled, 'true', 'false']
           E2E_NUTRITION_LAB_BUCKET: !If [NutritionLabEnabled, !Ref NutritionLabImages, '']
+          E2E_NUTRITION_LAB_JOBS_TABLE: !If [NutritionLabEnabled, !Ref NutritionLabJobs, '']
           E2E_NUTRITION_LAB_FUNCTION: !If [NutritionLabEnabled, !Ref NutritionLabFunction, '']
       Events:
         ApiRoot:
@@ -258,6 +280,12 @@ Resources:
           - NutritionLabEnabled
           - Version: '2012-10-17'
             Statement:
+              - Effect: Allow
+                Action: [dynamodb:GetItem, dynamodb:Query, dynamodb:PutItem, dynamodb:UpdateItem]
+                Resource: !GetAtt NutritionLabJobs.Arn
+                Condition:
+                  ForAllValues:StringEquals:
+                    dynamodb:LeadingKeys: [LAB#javaan-e2e]
               - Effect: Allow
                 Action: s3:PutObject
                 Resource: !Sub '${NutritionLabImages.Arn}/nutrition-lab/*'

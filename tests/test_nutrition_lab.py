@@ -11,7 +11,7 @@ from fastapi.testclient import TestClient
 
 from lambda_handlers import api, worker
 from macro_bot.direct_estimator import DirectOpenAIEstimator
-from macro_bot.nutrition_lab import NutritionLab, LabUnavailable, LabConflict, require_identity, validate_image, USER_PK
+from macro_bot.nutrition_lab import NutritionLab, LabUnavailable, LabConflict, require_identity, validate_image, USER_PK, JOB_PK
 from macro_bot.serverless_auth import hash_web_password
 from macro_bot.serverless_data import DynamoNutritionRepository, ActionFinalized
 from macro_bot.serverless_service import NutritionService
@@ -58,6 +58,7 @@ class LabTests(unittest.TestCase):
         self.addCleanup(self.env.stop)
         self.now = datetime(2026, 9, 5, 9, tzinfo=timezone.utc)
         self.table = LabTable()
+        self.jobs = LabTable()
         self.repo = DynamoNutritionRepository(self.table, table_name="fitness", now_fn=lambda: self.now)
         self.table.put_item(Item=identity_item())
         self.table.put_item(Item=marker_item())
@@ -69,9 +70,12 @@ class LabTests(unittest.TestCase):
         self.s3.get_object.side_effect = lambda **kw: {"Body": io.BytesIO(_jpg_bytes())}
         self.invoker = Mock()
         self.invoker.invoke.return_value = {"StatusCode": 202}
-        self.lab = NutritionLab(self.service, s3=self.s3, lambda_client=self.invoker)
+        self.lab = NutritionLab(self.service, s3=self.s3, lambda_client=self.invoker, jobs_table=self.jobs)
         self.responses = _Responses(_structured_payload())
         self.estimator = DirectOpenAIEstimator(client=Mock(responses=self.responses), max_retries=0)
+        jobs_patch = patch.object(NutritionLab, "jobs", new=property(lambda _: self.jobs))
+        jobs_patch.start()
+        self.addCleanup(jobs_patch.stop)
         self.job_id = "a" * 32
         self.client = TestClient(api.app, base_url="https://testserver")
         token, _session = self.repo.create_browser_session(self.identity)
@@ -88,12 +92,67 @@ class LabTests(unittest.TestCase):
         before = copy.deepcopy(self.table.items)
         job = self.run_job()
         changed = {key for key, item in self.table.items.items() if before.get(key) != item}
-        self.assertEqual(changed, {(USER_PK, "LAB_JOB#" + self.job_id)})
+        self.assertEqual(self.table.items, before)
+        self.assertEqual(changed, set())
         self.assertEqual(job["status"], "complete")
         self.assertNotIn("action", job)
         self.assertEqual(job["estimate"]["reconciliation_status"], "matched")
         self.assertTrue(self.responses.calls[0]["text"]["format"]["strict"])
         self.s3.delete_object.assert_called_once()
+
+    def test_production_preview_and_application_version(self):
+        from macro_bot.formatting import format_macro_message
+        from macro_bot.models import MealEstimate, ESTIMATOR_VERSION
+        self.responses.payload["estimator_version"] = "model-made-up-version"
+        job = self.run_job()
+        self.assertEqual(job["estimator_version"], ESTIMATOR_VERSION)
+        self.assertEqual(job["estimate"]["estimator_version"], ESTIMATOR_VERSION)
+        self.assertEqual(job["usage"]["estimator_version"], ESTIMATOR_VERSION)
+        self.assertEqual(job["telegram_preview"], format_macro_message(MealEstimate.from_api_payload(job["estimate"])))
+        self.assertGreaterEqual(job["latency_ms"], 0)
+
+    def test_recommendation_failure_and_dispatch_failure_preserve_confirmation(self):
+        from unittest.mock import AsyncMock
+        for failure in ("dispatch", "recommendation"):
+            with self.subTest(failure=failure):
+                job_id = ("b" if failure == "dispatch" else "c") * 32
+                self.run_job("log", job_id)
+                if failure == "dispatch":
+                    with patch.object(self.lab, "_dispatch", side_effect=RuntimeError("private SDK error")):
+                        job = self.lab.mutate(job_id, "confirm", {})
+                else:
+                    self.lab.mutate(job_id, "confirm", {})
+                    with patch.object(self.service, "recommendation_async", new=AsyncMock(side_effect=RuntimeError("private SDK error"))):
+                        asyncio.run(self.lab.process(job_id, "recommend"))
+                    job = self.lab.response(job_id)
+                self.assertEqual(job["action"]["status"], "confirmed")
+                self.assertEqual(job["recommendation_status"], "failed")
+                self.assertIn("error", job["recommendation"])
+                self.assertNotIn("private SDK", str(job))
+                self.assertTrue(any(meal["meal_id"] == job["action"]["meal_id"] for meal in job["daily_state"]["meals"]))
+
+    def test_past_local_date_uses_profile_timezone_and_skips_recommendation(self):
+        self.lab.submit(self.job_id, _jpg_bytes(), "", "log", "2026-09-04T00:15")
+        asyncio.run(self.lab.process(self.job_id, "analyze", estimator=self.estimator))
+        self.invoker.reset_mock()
+        job = self.lab.mutate(self.job_id, "confirm", {})
+        self.assertEqual(job["action"]["status"], "confirmed")
+        self.assertEqual(job["recommendation_status"], "skipped")
+        self.invoker.invoke.assert_not_called()
+        from datetime import date
+        yesterday = self.service.daily_nutrition_payload(self.identity, date(2026, 9, 4))
+        self.assertEqual(yesterday["meal_count"], 1)
+        self.assertEqual(job["daily_state"]["meal_count"], 0)
+        self.assertTrue(yesterday["meals"][0]["eaten_at"].startswith("2026-09-03T16:15"))
+
+    def test_reset_during_analysis_cannot_create_a_meal(self):
+        self.lab.submit(self.job_id, _jpg_bytes(), "", "log")
+        self.table.items[(USER_PK, "PROFILE")]["updated_at"] = "new-reset-revision"
+        before = copy.deepcopy(self.table.items)
+        asyncio.run(self.lab.process(self.job_id, "analyze", estimator=self.estimator))
+        self.assertEqual(self.lab.response(self.job_id)["status"], "failed")
+        self.assertEqual(self.table.items, before)
+        self.assertEqual(len(self.responses.calls), 0)
 
     def test_full_log_correction_confirm_recommendation_is_partition_bound(self):
         before = copy.deepcopy(self.table.items)
@@ -121,6 +180,32 @@ class LabTests(unittest.TestCase):
         with self.assertRaises(ActionFinalized):
             self.lab.mutate(self.job_id, "correct", {"type": "portion", "value": "smaller"})
 
+    def test_all_targeted_corrections_match_the_shared_service(self):
+        from macro_bot.models import MealEstimate
+        payload = _structured_payload(item_breakdown_complete=False)
+        for name in ("chicken with skin", "oil sauce"):
+            item = copy.deepcopy(payload["items"][0])
+            item["name"] = name
+            payload["items"].append(item)
+        self.responses.payload = payload
+        other = self.repo.resolve_identity(123, "comparison", "Offline comparison")
+        for index, (kind, value) in enumerate((("base", "half"), ("skin", "removed"), ("sauce", "light"),
+                                                ("sauce", "heavy"), ("portion", "smaller"), ("portion", "larger"))):
+            with self.subTest(kind=kind, value=value):
+                job_id = f"{index:032x}"
+                job = self.run_job("log", job_id)
+                original = job["action"]["original_estimate"]
+                action = self.service.create_pending_meal(other, chat_id=123, request_message_id=index,
+                    caption="", estimate=MealEstimate.from_api_payload(original), eaten_at=self.now)
+                self.service.apply_correction(other, action.token, kind, value)
+                corrected = self.lab.mutate(job_id, "correct", {"type": kind, "value": value})
+                self.assertEqual(corrected["action"]["original_estimate"], original)
+                self.assertEqual(corrected["action"]["estimate"], self.service.get_action(other, action.token).estimate.to_payload())
+                self.assertEqual(corrected["telegram_preview"], corrected["action"]["message"])
+
+    def test_job_ids_with_the_same_prefix_do_not_alias_actions(self):
+        self.assertNotEqual(self.lab.update_id("a" * 31 + "1"), self.lab.update_id("a" * 31 + "2"))
+
     def test_cancel_and_duplicate_delivery_do_not_log_or_reestimate(self):
         self.run_job("log")
         asyncio.run(self.lab.process(self.job_id, "analyze", estimator=self.estimator))
@@ -134,7 +219,7 @@ class LabTests(unittest.TestCase):
 
     def test_pending_meal_survives_adapter_restart_and_auto_confirms(self):
         self.run_job("log")
-        other = NutritionLab(NutritionService(self.repo), s3=self.s3, lambda_client=self.invoker)
+        other = NutritionLab(NutritionService(self.repo), s3=self.s3, lambda_client=self.invoker, jobs_table=self.jobs)
         action = other.response(self.job_id)["action"]
         self.now = self.now + timedelta(minutes=61)
         self.service.auto_confirm_expired_action(self.identity, action["token"])
@@ -259,11 +344,18 @@ class LabTests(unittest.TestCase):
             self.assertEqual(self.client.put(ROOT + "/" + "b" * 32, json=payload, headers=self.headers).status_code, 400)
             self.assertEqual(self.client.get(ROOT + "/../other").status_code, 404)
 
+    def test_query_overrides_and_missing_enable_flag_are_rejected(self):
+        with patch.object(api, "_service", return_value=self.service):
+            for name in ("user_id", "telegram_user_id", "identity_pk", "timezone"):
+                self.assertEqual(self.client.get(ROOT + "?" + name + "=other").status_code, 400)
+            with patch.dict(os.environ, {}, clear=True):
+                self.assertEqual(self.client.get(ROOT).status_code, 404)
+
     def test_crashed_job_has_bounded_polling_and_reset_cannot_recreate_job(self):
         self.lab.submit(self.job_id, _jpg_bytes(), "", "log")
         self.now += timedelta(seconds=181)
         self.assertEqual(self.lab.response(self.job_id)["status"], "failed")
-        self.table.items.pop((USER_PK, "LAB_JOB#" + self.job_id))
+        self.jobs.items.pop((JOB_PK, "LAB_JOB#" + self.job_id))
         with self.assertRaises(KeyError):
             asyncio.run(self.lab.process(self.job_id, "analyze", estimator=self.estimator))
         self.assertEqual(len(self.responses.calls), 0)
