@@ -221,7 +221,10 @@ async def browser_csrf_guard(request: Request, call_next: Any) -> Any:
         has_browser_cookie = bool(request.cookies.get(BROWSER_SESSION_COOKIE, ""))
         if not has_telegram_init_data and (is_auth_route or has_browser_cookie) and not _is_same_origin_request(request):
             return _no_store({"detail": "Cross-origin request blocked."}, status_code=403)
-    return await call_next(request)
+    response = await call_next(request)
+    if request.url.path.startswith("/api/e2e/nutrition-lab"):
+        response.headers["cache-control"] = "no-store"
+    return response
 
 
 @app.get("/api")
@@ -328,6 +331,11 @@ async def get_profile(
     service = _service()
     identity, launch = _auth_context(request, service)
     result = service.profile_response(identity)
+    try:
+        _nutrition_lab(request, service)
+        result["capabilities"] = {"nutrition_lab": True}
+    except HTTPException:
+        pass
     if launch:
         result["launch_context"] = {
             "launch_type": str(launch.get("launch_type", "nutrition")),
@@ -729,6 +737,91 @@ async def get_daily_nutrition(
     except ValueError as err:
         raise HTTPException(status_code=400, detail=str(err)) from err
     return _no_store(result)
+
+
+# This adapter is deliberately outside the normal nutrition routes. Every read
+# and mutation revalidates the synthetic identity; frontend visibility is only UX.
+def _nutrition_lab(request: Request, service=None):
+    from macro_bot.nutrition_lab import NutritionLab, LabUnavailable, enabled, require_identity
+    if not enabled() or request.headers.get("x-telegram-init-data", "").strip():
+        raise HTTPException(404, "Nutrition Lab unavailable.")
+    service = service or _service()
+    identity = _browser_session_identity(request, service)
+    try:
+        require_identity(service.repository, identity)
+        return NutritionLab(service)
+    except LabUnavailable as err:
+        raise HTTPException(404, "Nutrition Lab unavailable.") from err
+
+
+def _lab_error(err):
+    from macro_bot.nutrition_lab import LabConflict, LabUnavailable
+    from macro_bot.serverless_data import ActionNotFound, ActionExpired, ActionFinalized
+    if isinstance(err, (LabUnavailable, ActionNotFound, KeyError)):
+        return HTTPException(404, "Nutrition Lab record unavailable.")
+    if isinstance(err, (LabConflict, ActionExpired, ActionFinalized)):
+        return HTTPException(409, str(err))
+    if isinstance(err, ValueError):
+        return HTTPException(400, str(err))
+    logger.warning("nutrition_lab_request_failed error_category=%s", type(err).__name__)
+    return HTTPException(503, "Nutrition Lab temporarily unavailable. Retry the same request.")
+
+
+@app.get("/api/e2e/nutrition-lab/jobs")
+def lab_jobs(request: Request):
+    lab = _nutrition_lab(request)
+    try:
+        return _no_store({"jobs": lab.recent()})
+    except Exception as err:
+        raise _lab_error(err) from err
+
+
+@app.put("/api/e2e/nutrition-lab/jobs/{job_id}")
+async def lab_submit(job_id: str, request: Request):
+    import base64
+    import binascii
+    import json
+    from starlette.concurrency import run_in_threadpool
+    from macro_bot.nutrition_lab import MAX_BODY_BYTES
+    lab = _nutrition_lab(request)  # Authenticate before reading image bytes.
+    body = bytearray()
+    async for chunk in request.stream():
+        body.extend(chunk)
+        if len(body) > MAX_BODY_BYTES:
+            raise HTTPException(413, "Choose an image of at most 3 MB.")
+    try:
+        payload = json.loads(body)
+        if not isinstance(payload, dict) or set(payload) - {"image_base64", "caption", "mode"}:
+            raise ValueError("Invalid Lab upload fields.")
+        image = base64.b64decode(payload.get("image_base64", ""), validate=True)
+        result = await run_in_threadpool(lab.submit, job_id, image, payload.get("caption", ""), payload.get("mode", "estimate"))
+        return _no_store(result, 202)
+    except (binascii.Error, TypeError, UnicodeError) as err:
+        raise HTTPException(400, "Invalid image encoding.") from err
+    except Exception as err:
+        raise _lab_error(err) from err
+
+
+@app.get("/api/e2e/nutrition-lab/jobs/{job_id}")
+def lab_job(job_id: str, request: Request):
+    lab = _nutrition_lab(request)
+    try:
+        return _no_store(lab.response(job_id))
+    except Exception as err:
+        raise _lab_error(err) from err
+
+
+@app.post("/api/e2e/nutrition-lab/jobs/{job_id}/{operation}")
+def lab_action(job_id: str, operation: str, request: Request, payload: Dict[str, Any] = Body(default={})):
+    lab = _nutrition_lab(request)
+    try:
+        if set(payload) - {"type", "value"} or any(not isinstance(value, str) for value in payload.values()):
+            raise ValueError("Invalid correction fields.")
+        result = lab.mutate(job_id, operation, payload)
+        result["daily_nutrition"] = lab.service.daily_nutrition_payload(lab.identity)
+        return _no_store(result)
+    except Exception as err:
+        raise _lab_error(err) from err
 
 
 @app.api_route("/api/{path:path}", methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"])

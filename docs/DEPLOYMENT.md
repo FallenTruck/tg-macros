@@ -313,3 +313,16 @@ template, parameter, IAM, quota, or dependency issue and redeploy through SAM.
   presentation-only change.
 - Make the smallest safe change, validate it locally, then verify the deployed
   endpoint or CloudFront response.
+
+### Nutrition Lab release
+
+The Nutrition Lab is a backend, infrastructure, and Mini App release. The SAM
+parameter `EnableE2ENutritionLab` defaults to false; the documented dev
+`samconfig.toml` opts in. CloudFormation additionally requires the exact dev
+stack name, environment and region before creating `NutritionLabImages`,
+`NutritionLabFunction`, its log group, or the API's Lab permissions. Use the
+normal full release sequence, then `make e2e-nutrition-lab`. The additional S3
+bucket is private, encrypted, and contains only temporary test images with a
+one-day expiration rule. Disabling/removing the feature may require waiting for
+that bucket to empty before CloudFormation can delete it; do not delete retained
+nutrition tables to resolve such an error.

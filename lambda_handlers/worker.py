@@ -666,7 +666,6 @@ async def _handle_photo(
     )
     image_bytes = output.getvalue()
     caption = str(message.get("caption", "") or "")[:1000]
-    persona_hint = service.persona_hint(identity, caption)
     def estimator_telemetry(stage: str, duration_ms: int, result: str, stage_attempt: Optional[int], error_category: Optional[str]) -> None:
         _log_stage(
             update_id,
@@ -681,7 +680,7 @@ async def _handle_photo(
     try:
         if hasattr(estimator, "_telemetry_callback"):
             estimator._telemetry_callback = estimator_telemetry
-        estimation = await estimator.estimate(image_bytes, caption=caption, persona_hint=persona_hint)
+        estimation = await service.analyze_meal_image(identity, image_bytes, caption, estimator=estimator)
     except DirectEstimationError as err:
         if getattr(err, "retryable", True):
             raise

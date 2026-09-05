@@ -1,3 +1,4 @@
+from macro_bot.serverless_service import NutritionService
 import asyncio
 import io
 import json
@@ -81,6 +82,7 @@ class _FakeBot:
 
 
 class _FakeWorkerService:
+    analyze_meal_image = NutritionService.analyze_meal_image
     def __init__(self):
         self.identity = ServerlessIdentity(101, "internal-a", "a", "A", "now", "now")
         self.workflow = None

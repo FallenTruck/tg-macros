@@ -16,6 +16,9 @@ from scripts.e2e_support import (
     aws_session,
     dev_resources,
     load_e2e_credentials,
+    read_e2e_records,
+    validate_e2e_credential,
+    user_partition_items,
 )
 
 
@@ -29,6 +32,9 @@ class LiveJavaanFitnessE2ETests(unittest.TestCase):
         cls._sync_playwright = staticmethod(sync_playwright)
         session = aws_session()
         _session, _table, outputs, _repository = dev_resources(session)
+        read_e2e_records(_table)
+        validate_e2e_credential(_repository.get_web_credential("javaan-e2e"))
+        cls.table = _table
         cls.base_url = outputs["MiniAppUrl"].rstrip("/")
         cls.username, cls.password = load_e2e_credentials(session)
 
@@ -282,6 +288,112 @@ class LiveJavaanFitnessE2ETests(unittest.TestCase):
             page.get_by_test_id("logout").click()
             page.get_by_test_id("browser-login-form").wait_for(state="visible", timeout=30_000)
             self.assertTrue(page.locator("#app-shell").is_hidden())
+        finally:
+            browser.close()
+            playwright.stop()
+
+    def test_live_nutrition_lab(self):
+        """Real image + real OpenAI, with no numeric accuracy claims."""
+        image = Path(os.getenv("JAVAAN_E2E_MEAL_IMAGE", "images/6143401176322477320.jpg")).resolve()
+        if not image.is_file():
+            self.fail("JAVAAN_E2E_MEAL_IMAGE must point to a real meal photograph")
+        caption = os.getenv("JAVAAN_E2E_MEAL_CAPTION", "" if os.getenv("JAVAAN_E2E_MEAL_IMAGE") else
+                            "Scrambled eggs, sausages, pasta, mashed potato, and grilled meat with sauce")
+        output_dir = Path("artifacts/e2e")
+        output_dir.mkdir(parents=True, exist_ok=True)
+        playwright, browser = self._new_browser()
+        try:
+            context = browser.new_context(viewport={"width": 390, "height": 844})
+            page = self._open_page(context)
+            self._login(page)
+            self._navigate(page, "nutrition", "#nutrition-view")
+            page.get_by_test_id("nutrition-lab").wait_for(state="visible", timeout=30_000)
+            self._assert_no_horizontal_overflow(page)
+
+            def snapshot_domain():
+                return {item["SK"]: item for item in user_partition_items(self.table, "e2e-javaan-e2e")
+                        if not item["SK"].startswith("LAB_JOB#")}
+
+            def result():
+                import json
+                return json.loads(page.get_by_test_id("lab-json").inner_text())
+
+            def upload(mode):
+                old = page.get_by_test_id("lab-recent").input_value()
+                page.get_by_test_id("lab-image").set_input_files(str(image))
+                page.get_by_test_id("lab-caption").fill(caption)
+                page.get_by_test_id("lab-mode").select_option(mode)
+                page.get_by_test_id("lab-submit").click()
+                page.wait_for_function("old => document.getElementById('lab-recent').value !== old", arg=old, timeout=30_000)
+                page.wait_for_function("""() => {
+                    const t = document.getElementById('lab-status').textContent;
+                    return !t.includes('queued') && !t.includes('running') && !t.includes('Uploading');
+                }""", timeout=210_000)
+                if page.get_by_test_id("lab-json").count() != 1:
+                    self.fail("Live estimator did not produce a result: " + page.get_by_test_id("lab-status").inner_text())
+                data = result()
+                self.assertEqual(data["status"], "complete")
+                self.assertIn(data["estimate"]["reconciliation_status"], {"matched", "reconciled_from_items", "partial_item_breakdown", "reconciliation_required"})
+                self.assertTrue(data["estimate"]["items"])
+                return data
+
+            before = snapshot_domain()
+            estimate = upload("estimate")
+            self.assertNotIn("action", estimate)
+            self.assertEqual(snapshot_domain(), before)
+            page.screenshot(path=str(output_dir / "nutrition-lab-estimate-mobile.png"), full_page=True)
+
+            pending = upload("log")
+            self.assertEqual(pending["action"]["status"], "pending")
+            pending_id = pending["job_id"]
+            page.reload(wait_until="domcontentloaded")
+            self._wait_for_app_ready(page)
+            self._navigate(page, "nutrition", "#nutrition-view")
+            page.get_by_test_id("lab-recent").select_option(pending_id)
+            page.get_by_test_id("lab-correct-portion-smaller").wait_for(state="visible", timeout=30_000)
+            page.get_by_test_id("lab-correct-portion-smaller").click()
+            page.wait_for_function("""() => {
+                const raw = document.querySelector('[data-testid="lab-json"]')?.textContent;
+                if (!raw) return false;
+                const job = JSON.parse(raw);
+                return job.action.estimate.calories < job.action.original_estimate.calories;
+            }""", timeout=30_000)
+            corrected = result()
+            page.get_by_test_id("lab-confirm").click()
+            page.wait_for_function("""() => {
+                const raw = document.querySelector('[data-testid="lab-json"]')?.textContent;
+                return raw && JSON.parse(raw).recommendation_status === 'complete';
+            }""", timeout=210_000)
+            confirmed = result()
+            self.assertEqual(confirmed["action"]["status"], "confirmed")
+            self.assertIn("strategy_version", confirmed["recommendation"])
+            day = context.request.get(self.base_url + "/api/nutrition/day").json()
+            meal = next(item for item in day["meals"] if item["meal_id"] == confirmed["action"]["meal_id"])
+            self.assertEqual(meal["macros"], corrected["action"]["estimate"]["total_best"])
+            page.screenshot(path=str(output_dir / "nutrition-lab-confirmed-mobile.png"), full_page=True)
+            for width in (360, 1280):
+                page.set_viewport_size({"width": width, "height": 900})
+                self._assert_no_horizontal_overflow(page)
+            page.screenshot(path=str(output_dir / "nutrition-lab-desktop.png"), full_page=True)
+            before_cancel = context.request.get(self.base_url + "/api/nutrition/day").json()
+            upload("log")
+            page.get_by_test_id("lab-cancel").click()
+            page.wait_for_function("""() => {
+                const raw = document.querySelector('[data-testid="lab-json"]')?.textContent;
+                return raw && JSON.parse(raw).action?.status === 'cancelled';
+            }""", timeout=30_000)
+            after_cancel = context.request.get(self.base_url + "/api/nutrition/day").json()
+            self.assertEqual(after_cancel["consumed"], before_cancel["consumed"])
+            self.assertEqual(after_cancel["meal_count"], before_cancel["meal_count"])
+            import json
+            (output_dir / "nutrition-lab-live-results.json").write_text(json.dumps({
+                "image": image.name, "caption": caption,
+                "estimate_only": estimate, "corrected_confirmation": confirmed, "cancelled": result(),
+            }, indent=2), encoding="utf-8")
+            page.get_by_test_id("logout").click()
+            page.get_by_test_id("browser-login-form").wait_for(state="visible", timeout=30_000)
+            self.assertTrue(page.get_by_test_id("nutrition-lab").is_hidden())
+            self.assertEqual(context.request.get(self.base_url + "/api/e2e/nutrition-lab/jobs").status, 401)
         finally:
             browser.close()
             playwright.stop()

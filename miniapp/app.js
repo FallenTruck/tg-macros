@@ -251,6 +251,7 @@ async function loadAuthenticatedApp(profileResponse = null) {
   try {
     const response = profileResponse || await apiFetch("/api/profile");
     state.meta = response;
+    await initializeNutritionLab(response.capabilities?.nutrition_lab === true);
     state.profile = response.profile || null;
     state.viewer = normalizeViewer(response.viewer, state.viewer);
     renderMeta(response);
@@ -351,6 +352,7 @@ async function handleBrowserLogout() {
   logoutButton.disabled = true;
   try {
     await apiFetch("/api/auth/logout", {method: "POST"});
+    clearNutritionLab();
     state.profile = null;
     state.nutritionDay = null;
     state.preview = null;
@@ -1415,4 +1417,194 @@ function fallbackGoalOptions() {
     { value: "maintain", label: "Maintain" },
     { value: "gain", label: "Gain muscle" },
   ];
+}
+
+
+// Dev-only evaluation UI. The server independently gates every Lab request.
+let labTimer = null;
+let labPreviewUrl = null;
+let labRequestId = null;
+let labCurrentJob = null;
+let labEnabled = false;
+const labRoot = document.getElementById("nutrition-lab");
+const labApi = "/api/e2e/nutrition-lab/jobs";
+
+function clearNutritionLab() {
+  labEnabled = false;
+  clearTimeout(labTimer);
+  if (labPreviewUrl) URL.revokeObjectURL(labPreviewUrl);
+  labPreviewUrl = null;
+  labRequestId = null;
+  labCurrentJob = null;
+  labRoot.replaceChildren();
+  labRoot.hidden = true;
+}
+
+async function initializeNutritionLab(allowed) {
+  clearNutritionLab();
+  if (!allowed || state.authMode !== "browser") return;
+  labEnabled = true;
+  labRoot.hidden = false;
+  labRoot.innerHTML = `
+    <p class="eyebrow">Development · javaan-e2e only</p>
+    <h2>E2E Nutrition Lab</h2>
+    <p>Evaluate real meal photos with the production nutrition pipeline.</p>
+    <form id="lab-upload-form" data-testid="lab-upload-form">
+      <label>Meal image (JPEG, PNG or WebP, up to 3 MB)
+        <input id="lab-image" type="file" accept="image/jpeg,image/png,image/webp" required data-testid="lab-image">
+      </label>
+      <img id="lab-preview" alt="Selected meal photo" hidden>
+      <label>Optional caption<textarea id="lab-caption" maxlength="1000" rows="2" data-testid="lab-caption"></textarea></label>
+      <label>Mode<select id="lab-mode" data-testid="lab-mode">
+        <option value="estimate">Estimate-only · no meal or action</option>
+        <option value="log">Full synthetic log · correction and confirmation</option>
+      </select></label>
+      <p>Full logs use the existing confirmation timeout and may log automatically after it expires. All writes belong to the isolated test account.</p>
+      <button type="submit" id="lab-submit" data-testid="lab-submit">Analyze image</button>
+    </form>
+    <p id="lab-status" role="status" aria-live="polite" data-testid="lab-status"></p>
+    <label>Recent runs (24 hours)<select id="lab-recent" data-testid="lab-recent"><option value="">Select a run</option></select></label>
+    <div id="lab-result" data-testid="lab-result"></div>`;
+  document.getElementById("lab-upload-form").addEventListener("submit", submitLabImage);
+  document.getElementById("lab-upload-form").addEventListener("input", () => { labRequestId = null; });
+  document.getElementById("lab-image").addEventListener("change", event => {
+    if (labPreviewUrl) URL.revokeObjectURL(labPreviewUrl);
+    const file = event.target.files[0];
+    labPreviewUrl = file ? URL.createObjectURL(file) : null;
+    const preview = document.getElementById("lab-preview");
+    preview.hidden = !labPreviewUrl;
+    if (labPreviewUrl) preview.src = labPreviewUrl;
+    else preview.removeAttribute("src");
+  });
+  document.getElementById("lab-recent").addEventListener("change", async event => {
+    if (!event.target.value) return;
+    clearTimeout(labTimer);
+    try { renderLabJob(await apiFetch(`${labApi}/${event.target.value}`)); }
+    catch (error) { labStatus(error.message); }
+  });
+  try {
+    const {jobs} = await apiFetch(labApi);
+    if (!labEnabled) return;
+    for (const job of jobs) addLabRecent(job);
+    if (jobs.length) renderLabJob(jobs[0]);
+  } catch (error) { labStatus(error.message); }
+}
+
+function labStatus(message) {
+  const element = document.getElementById("lab-status");
+  if (element) element.textContent = message;
+}
+
+function addLabRecent(job) {
+  const select = document.getElementById("lab-recent");
+  if (!select || [...select.options].some(option => option.value === job.job_id)) return;
+  const option = document.createElement("option");
+  option.value = job.job_id;
+  option.textContent = `${new Date(job.created_at * 1000).toLocaleTimeString()} · ${job.mode} · ${job.caption || "No caption"}`;
+  select.append(option);
+}
+
+async function submitLabImage(event) {
+  event.preventDefault();
+  const form = event.currentTarget;
+  const file = document.getElementById("lab-image").files[0];
+  if (!file || file.size > 3000000) { labStatus("Choose an image of at most 3 MB."); return; }
+  const caption = document.getElementById("lab-caption").value;
+  const mode = document.getElementById("lab-mode").value;
+  labRequestId ||= crypto.randomUUID().replaceAll("-", "");
+  const requestId = labRequestId;
+  clearTimeout(labTimer);
+  for (const control of form.elements) control.disabled = true;
+  labStatus("Uploading real image…");
+  try {
+    const imageBase64 = await new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => resolve(String(reader.result).split(",")[1]);
+      reader.onerror = () => reject(new Error("Could not read the image."));
+      reader.readAsDataURL(file);
+    });
+    const job = await apiFetch(`${labApi}/${requestId}`, {method: "PUT", body: JSON.stringify({image_base64: imageBase64, caption, mode})});
+    if (!labEnabled) return;
+    labRequestId = null;
+    addLabRecent(job);
+    renderLabJob(job);
+  } catch (error) { labStatus(error.message + " You can retry this upload safely."); }
+  finally { for (const control of form.elements) control.disabled = false; }
+}
+
+function renderLabJob(job) {
+  if (!labEnabled) return;
+  clearTimeout(labTimer);
+  labCurrentJob = job;
+  document.getElementById("lab-recent").value = job.job_id;
+  const status = job.action?.status || job.status;
+  labStatus(job.error || `${job.mode === "estimate" ? "Estimate-only" : "Synthetic log"}: ${status}${job.recommendation_status ? ` · Recommendation: ${job.recommendation_status}` : ""}`);
+  const result = document.getElementById("lab-result");
+  result.replaceChildren();
+  if (job.action) {
+    const message = document.createElement("pre");
+    message.textContent = job.action.message;
+    result.append(message);
+    if (job.action.status === "pending") {
+      const controls = document.createElement("div");
+      controls.className = "lab-actions";
+      for (const correction of job.corrections || []) {
+        const button = document.createElement("button");
+        button.type = "button";
+        button.textContent = correction.label;
+        button.dataset.testid = `lab-correct-${correction.type}-${correction.value}`;
+        button.addEventListener("click", () => mutateLabJob("correct", {type: correction.type, value: correction.value}));
+        controls.append(button);
+      }
+      for (const operation of ["confirm", "cancel"]) {
+        const button = document.createElement("button");
+        button.type = "button";
+        button.textContent = operation === "confirm" ? "Confirm synthetic meal" : "Cancel synthetic meal";
+        button.dataset.testid = `lab-${operation}`;
+        button.addEventListener("click", () => mutateLabJob(operation));
+        controls.append(button);
+      }
+      result.append(controls);
+    }
+  }
+  if (job.estimate || job.action) {
+    const title = document.createElement("h3");
+    title.textContent = "Structured result";
+    const pre = document.createElement("pre");
+    pre.dataset.testid = "lab-json";
+    pre.textContent = JSON.stringify(job, null, 2);
+    const download = document.createElement("button");
+    download.type = "button";
+    download.textContent = "Download result JSON";
+    download.addEventListener("click", () => {
+      const url = URL.createObjectURL(new Blob([JSON.stringify(job, null, 2)], {type: "application/json"}));
+      const anchor = document.createElement("a");
+      anchor.href = url;
+      anchor.download = `nutrition-lab-${job.job_id}.json`;
+      anchor.click();
+      setTimeout(() => URL.revokeObjectURL(url), 1000);
+    });
+    result.append(title, download, pre);
+  }
+  if (["queued", "running"].includes(job.status) || ["queued", "running"].includes(job.recommendation_status)) {
+    labTimer = setTimeout(async () => {
+      try { const refreshed = await apiFetch(`${labApi}/${job.job_id}`); if (labCurrentJob?.job_id === job.job_id) renderLabJob(refreshed); }
+      catch (error) { labStatus(error.message + " Reload to resume this run."); }
+    }, 2000);
+  }
+}
+
+async function mutateLabJob(operation, payload = {}) {
+  const jobId = labCurrentJob?.job_id;
+  if (!jobId) return;
+  for (const button of document.querySelectorAll(".lab-actions button")) button.disabled = true;
+  try {
+    const job = await apiFetch(`${labApi}/${jobId}/${operation}`, {method: "POST", body: JSON.stringify(payload)});
+    if (labCurrentJob?.job_id === jobId) renderLabJob(job);
+    await loadDailyNutrition();
+  } catch (error) {
+    // A correction is deliberately never replayed automatically after a lost response.
+    try { renderLabJob(await apiFetch(`${labApi}/${jobId}`)); } catch (_error) { /* reload can recover */ }
+    labStatus(error.message + " Review the current result before trying again.");
+  }
 }

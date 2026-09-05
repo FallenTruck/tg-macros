@@ -242,3 +242,16 @@ Those directories are checked against their canonical sources by
 `tests/test_runtime_bundle.py`. `.samignore` excludes tests, local tools,
 repository data, and other non-runtime files from SAM packaging. `.aws-sam/`
 is generated build output and is ignored by Git.
+
+### Development Nutrition Lab
+
+The gated browser E2E adapter submits temporary image-analysis jobs to a private
+S3 bucket and a dedicated asynchronous Lambda. The API returns quickly and the
+browser polls its isolated `USER#e2e-javaan-e2e / LAB_JOB#<id>` result. Both this
+adapter and Telegram call `NutritionService.analyze_meal_image`, which supplies
+user-scoped correction priors to the unchanged DirectOpenAIEstimator. Production
+pending actions, corrections, finalization, and daily-summary reads are shared.
+Recommendation adapters bind their reads to the supplied canonical identity,
+including synthetic identities without a Telegram account. No synthetic
+`IDENTITY#TELEGRAM#0` record is resolved or created. See E2E_TESTING.md for the
+four-part deployment gate, identity proof, image cleanup, and live checks.

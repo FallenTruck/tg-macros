@@ -10,6 +10,7 @@ class RuntimeBundleTests(unittest.TestCase):
     def test_runtime_bundle_matches_canonical_serverless_sources(self):
         module_names = [
             "direct_estimator.py",
+            "nutrition_lab.py",
             "formatting.py",
             "models.py",
             "profile_targets.py",
@@ -28,6 +29,7 @@ class RuntimeBundleTests(unittest.TestCase):
             )
         self.assertEqual((ROOT / "lambda_handlers" / "api.py").read_bytes(), (RUNTIME / "api.py").read_bytes())
         self.assertEqual((ROOT / "lambda_handlers" / "worker.py").read_bytes(), (RUNTIME / "worker.py").read_bytes())
+        self.assertEqual((ROOT / "lambda_handlers" / "lab_worker.py").read_bytes(), (RUNTIME / "lab_worker.py").read_bytes())
         self.assertEqual((ROOT / "food_catalog.json").read_bytes(), (RUNTIME / "food_catalog.json").read_bytes())
 
     def test_runtime_bundle_contains_no_repository_data_or_test_sources(self):

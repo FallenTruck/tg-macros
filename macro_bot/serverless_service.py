@@ -55,11 +55,12 @@ class ReadOnlyFoodCatalogStore:
 
 
 class _DynamoProfileStore:
-    def __init__(self, repository: DynamoNutritionRepository):
+    def __init__(self, repository: DynamoNutritionRepository, identity: Optional[ServerlessIdentity] = None):
         self._repository = repository
+        self._identity = identity
 
     def get(self, telegram_user_id: int) -> UserProfile:
-        identity = self._repository.resolve_identity(telegram_user_id)
+        identity = self._identity or self._repository.resolve_identity(telegram_user_id)
         profile = self._repository.get_profile(identity.user_id)
         if profile is None:
             raise KeyError(f"Unknown profile: {telegram_user_id}")
@@ -67,11 +68,12 @@ class _DynamoProfileStore:
 
 
 class _DynamoMealLogRepository:
-    def __init__(self, repository: DynamoNutritionRepository):
+    def __init__(self, repository: DynamoNutritionRepository, identity: Optional[ServerlessIdentity] = None):
         self._repository = repository
+        self._bound_identity = identity
 
     def _identity(self, telegram_user_id: int) -> ServerlessIdentity:
-        return self._repository.resolve_identity(telegram_user_id)
+        return self._bound_identity or self._repository.resolve_identity(telegram_user_id)
 
     def get_daily_summary(self, telegram_user_id: int, target_date: date):
         identity = self._identity(telegram_user_id)
@@ -383,6 +385,15 @@ class NutritionService:
     def persona_hint(self, identity: ServerlessIdentity, caption: str) -> str:
         return self.repository.persona_hint(identity, caption)
 
+    async def analyze_meal_image(self, identity: ServerlessIdentity, image_bytes: bytes, caption: str = "", *, estimator: Any = None):
+        """Shared, read-only production analysis boundary for image adapters."""
+        from .direct_estimator import DirectOpenAIEstimator
+
+        caption = str(caption or "")[:1000]
+        return await (estimator or DirectOpenAIEstimator()).estimate(
+            image_bytes, caption=caption, persona_hint=self.persona_hint(identity, caption),
+        )
+
     def create_pending_meal(self, identity: ServerlessIdentity, **kwargs: Any):
         return self.repository.create_pending_meal(identity, **kwargs)
 
@@ -415,15 +426,26 @@ class NutritionService:
 
     def recommendation(self, identity: ServerlessIdentity):
         target_date = self._local_date(identity)
-        prepared = self._planner.prepare(identity.telegram_user_id, target_date=target_date)
+        planner = self._planner_for_identity(identity)
+        prepared = planner.prepare(identity.telegram_user_id, target_date=target_date)
         if prepared.skip_reason:
-            return self._planner.build_skip_result(prepared), prepared
-        return self._planner.build_fallback_result(prepared), prepared
+            return planner.build_skip_result(prepared), prepared
+        return planner.build_fallback_result(prepared), prepared
+
+    def _planner_for_identity(self, identity: ServerlessIdentity):
+        # Bind reads to the already authenticated identity, including identities
+        # with no Telegram account. Never resolve the synthetic sentinel id 0.
+        return RecommendationPlanner(
+            _DynamoMealLogRepository(self.repository, identity),
+            _DynamoProfileStore(self.repository, identity),
+            self.catalog_store,
+            recommendation_client=self._planner._recommendation_client,
+        )
 
     async def recommendation_async(self, identity: ServerlessIdentity):
         """Use catalogue-only LLM ranking with deterministic fallback."""
 
-        return await self._planner.recommend_next_meal(
+        return await self._planner_for_identity(identity).recommend_next_meal(
             identity.telegram_user_id,
             target_date=self._local_date(identity),
         )

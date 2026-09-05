@@ -158,3 +158,99 @@ For frontend or end-to-end work, use this order:
 Never run these commands against a non-development stack. If Chromium or
 Playwright installation fails, report the exact installation error instead of
 performing broad machine troubleshooting.
+
+## E2E Nutrition Lab
+
+The Nutrition tab exposes **E2E Nutrition Lab** only to the validated
+`javaan-e2e` browser session. This is an evaluation and regression surface.
+Normal browser users, Telegram launch sessions, and unauthenticated callers
+cannot access any Lab endpoint. Hiding the controls is not the security boundary:
+every endpoint and asynchronous worker validates the canonical E2E marker,
+identity, credential mapping, reserved user partition, and deployment gate.
+
+Deployment requires `EnableE2ENutritionLab=true`, `EnvironmentName=dev`, the exact
+`tg-macros-dev` stack, and `ap-southeast-1`. The parameter defaults to false;
+`samconfig.toml` opts in only the documented development stack. The dedicated
+worker has DynamoDB write permission only for `USER#e2e-javaan-e2e` and has no
+Telegram Bot token permission. Disable with `EnableE2ENutritionLab=false` through
+SAM. Never enable this surface for normal accounts or another environment.
+
+Use a real JPEG, PNG, or WebP image, up to 3 MB and 25 megapixels, with an optional
+caption of at most 1,000 characters. Images pass unchanged to the shared service,
+then the existing DirectOpenAIEstimator preprocessing, strict OpenAI schema,
+validation, and reconciliation. The browser does not infer nutrition or resize
+images. The smaller upload cap leaves room for JSON/base64 in the API invocation.
+
+- **Estimate-only:** shows structured estimate, item evidence, uncertainty,
+  reconciliation, model and usage. It creates only a temporary `LAB_JOB#` result;
+  it never creates a meal, action, correction, or daily nutrition change.
+- **Full synthetic log:** creates the production pending meal/action/detail
+  records, exposes the production contextual corrections, and allows confirm or
+  cancel. Confirmation updates the daily read model and starts the same
+  recommendation planner/client/fallback path used by Telegram. Recommendation
+  failure does not undo a confirmed meal. The existing one-hour pending deadline
+  and scheduled auto-confirm semantics apply; a browser refresh does not cancel
+  the meal. The worker never sends a Telegram message for this account.
+
+The Lab uses an asynchronous Lambda job so an estimate does not race the HTTP
+API timeout. The private encrypted `NutritionLabImages` bucket holds uploaded
+bytes only during processing; the worker deletes the object on success or
+failure, with a one-day S3 lifecycle fallback for interruption/orphan uploads.
+Jobs and structured evaluation results have a 24-hour DynamoDB TTL and are
+hidden after expiry. Durable meals and correction feedback retain the production
+retention rules. Neither raw image bytes nor credentials enter DynamoDB jobs,
+logs, screenshots, or result downloads. The user-selected photo can appear in
+post-authentication screenshots. Exported result JSON contains the caption and
+nutrition result, so keep exports local unless intentionally sharing test data.
+
+The browser lists recent jobs and resumes polling after reload. Repeating the
+same upload request id and payload returns the same job; different payloads with
+that id are rejected. Duplicate worker delivery is conditionally claimed once.
+After a worker interruption, polling terminates after three minutes and exposes
+any already durable action. Run a new job to retry estimation. Corrections are
+never automatically replayed after a lost HTTP response; inspect the refreshed
+result before applying another correction. Confirm/cancel retain production
+idempotency. The reset command already deletes Lab jobs in the exact test user
+partition; temporary image objects expire independently.
+
+API routes (all require the gated browser session; writes also require the
+configured same-origin check):
+
+- `GET /api/e2e/nutrition-lab/jobs` — recent runs
+- `PUT /api/e2e/nutrition-lab/jobs/{32-hex-request-id}` — JSON with `image_base64`,
+  `caption`, and `mode` (`estimate` or `log`), returning 202
+- `GET /api/e2e/nutrition-lab/jobs/{id}` — structured status/result and current action
+- `POST /api/e2e/nutrition-lab/jobs/{id}/correct` — `type` and `value` from the
+  returned correction choices
+- `POST /api/e2e/nutrition-lab/jobs/{id}/confirm` or `/cancel` — empty JSON body
+
+Client-supplied user ids, action tokens, estimator/model overrides, image URLs,
+and partition keys are not accepted.
+
+Run offline boundary and browser tests:
+
+```bash
+.venv/bin/python -m unittest tests.test_nutrition_lab
+.venv/bin/python -m unittest e2e.test_nutrition_lab_browser.NutritionLabBrowserTests
+```
+
+The offline browser test uploads the real repository image while stubbing cloud
+services and the OpenAI response. It proves browser integration, not model
+accuracy. The explicit live target resets the synthetic account and makes three
+real image/model calls for estimate-only, corrected confirmation/recommendation,
+and cancellation:
+
+```bash
+make e2e-nutrition-lab
+```
+
+Override the photograph with `JAVAAN_E2E_MEAL_IMAGE=/absolute/path/meal.jpg` and
+optionally set `JAVAAN_E2E_MEAL_CAPTION`. A custom image defaults to no caption.
+The default is `images/6143401176322477320.jpg`. The live test verifies zero
+estimate-only domain writes, durable refresh, corrected daily macros,
+recommendation completion, cancellation without consumption changes, responsive
+layout, and logged-out denial. It produces `nutrition-lab-estimate-mobile.png`,
+`nutrition-lab-confirmed-mobile.png`, and `nutrition-lab-desktop.png` in ignored
+`artifacts/e2e/`, alongside `nutrition-lab-live-results.json` containing the
+three structured run results. Tests assert pipeline behavior and structure, not nutritional
+accuracy without human-reviewed labels.

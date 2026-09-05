@@ -1,4 +1,4 @@
-.PHONY: sync-runtime nutrition-eval deploy-miniapp e2e-install e2e-provision e2e-reset e2e-smoke e2e-screenshots
+.PHONY: e2e-nutrition-lab sync-runtime nutrition-eval deploy-miniapp e2e-install e2e-provision e2e-reset e2e-smoke e2e-screenshots
 
 RUNTIME_DIR = lambda_handlers/runtime
 AWS_PROFILE ?= fitness-dev
@@ -9,9 +9,10 @@ E2E_PYTHON ?= .venv/bin/python
 sync-runtime:
 	mkdir -p "$(RUNTIME_DIR)/macro_bot" lambda_handlers/webhook_runtime
 	cp lambda_handlers/worker.py "$(RUNTIME_DIR)/worker.py"
+	cp lambda_handlers/lab_worker.py "$(RUNTIME_DIR)/lab_worker.py"
 	cp lambda_handlers/api.py "$(RUNTIME_DIR)/api.py"
 	cp lambda_handlers/webhook.py lambda_handlers/webhook_runtime/webhook.py
-	cp macro_bot/__init__.py macro_bot/direct_estimator.py macro_bot/formatting.py macro_bot/models.py macro_bot/profile_targets.py macro_bot/recommendations.py macro_bot/serverless_auth.py macro_bot/serverless_data.py macro_bot/serverless_service.py macro_bot/workout_execution.py macro_bot/workout_programme.py "$(RUNTIME_DIR)/macro_bot/"
+	cp macro_bot/__init__.py macro_bot/nutrition_lab.py macro_bot/direct_estimator.py macro_bot/formatting.py macro_bot/models.py macro_bot/profile_targets.py macro_bot/recommendations.py macro_bot/serverless_auth.py macro_bot/serverless_data.py macro_bot/serverless_service.py macro_bot/workout_execution.py macro_bot/workout_programme.py "$(RUNTIME_DIR)/macro_bot/"
 	cp food_catalog.json "$(RUNTIME_DIR)/food_catalog.json"
 
 nutrition-eval:
@@ -37,3 +38,8 @@ e2e-smoke:
 e2e-screenshots:
 	AWS_PROFILE="$(AWS_PROFILE)" AWS_REGION="$(AWS_REGION)" AWS_DEFAULT_REGION="$(AWS_REGION)" $(E2E_PYTHON) scripts/reset_e2e_account.py --yes
 	RUN_JAVAAN_E2E=1 AWS_PROFILE="$(AWS_PROFILE)" AWS_REGION="$(AWS_REGION)" AWS_DEFAULT_REGION="$(AWS_REGION)" $(E2E_PYTHON) -m unittest e2e.test_live_app.LiveJavaanFitnessE2ETests.test_live_screenshots
+
+
+e2e-nutrition-lab:
+	AWS_PROFILE="$(AWS_PROFILE)" AWS_REGION="$(AWS_REGION)" AWS_DEFAULT_REGION="$(AWS_REGION)" $(E2E_PYTHON) scripts/reset_e2e_account.py --yes
+	RUN_JAVAAN_E2E=1 AWS_PROFILE="$(AWS_PROFILE)" AWS_REGION="$(AWS_REGION)" AWS_DEFAULT_REGION="$(AWS_REGION)" $(E2E_PYTHON) -m unittest e2e.test_live_app.LiveJavaanFitnessE2ETests.test_live_nutrition_lab

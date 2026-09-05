@@ -15,6 +15,10 @@ Parameters:
   WebhookSecretParameterName:
     Type: String
     Default: /tg-macros/prod/TELEGRAM_WEBHOOK_SECRET
+  EnableE2ENutritionLab:
+    Type: String
+    Default: "false"
+    AllowedValues: ["true", "false"]
   MiniAppUrl:
     Type: String
     Default: ""
@@ -37,7 +41,85 @@ Globals:
         WEBHOOK_SECRET_PARAMETER_NAME: !Ref WebhookSecretParameterName
         MINI_APP_URL: !Ref MiniAppUrl
 
+Conditions:
+  NutritionLabEnabled: !And
+    - !Equals [!Ref EnvironmentName, dev]
+    - !Equals [!Ref 'AWS::StackName', tg-macros-dev]
+    - !Equals [!Ref 'AWS::Region', ap-southeast-1]
+    - !Equals [!Ref EnableE2ENutritionLab, 'true']
+
 Resources:
+  NutritionLabImages:
+    Type: AWS::S3::Bucket
+    Condition: NutritionLabEnabled
+    Properties:
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault:
+              SSEAlgorithm: AES256
+      LifecycleConfiguration:
+        Rules:
+          - Id: ExpireLabImages
+            Status: Enabled
+            ExpirationInDays: 1
+            AbortIncompleteMultipartUpload:
+              DaysAfterInitiation: 1
+
+  NutritionLabFunction:
+    Type: AWS::Serverless::Function
+    Condition: NutritionLabEnabled
+    Properties:
+      CodeUri: lambda_handlers/runtime
+      Handler: lab_worker.handler
+      Timeout: 120
+      MemorySize: 512
+      Environment:
+        Variables:
+          STACK_NAME: !Ref 'AWS::StackName'
+          E2E_NUTRITION_LAB_ENABLED: 'true'
+          E2E_NUTRITION_LAB_BUCKET: !Ref NutritionLabImages
+      EventInvokeConfig:
+        MaximumEventAgeInSeconds: 60
+        MaximumRetryAttempts: 0
+      Policies:
+        - AWSLambdaBasicExecutionRole
+        - Version: '2012-10-17'
+          Statement:
+            - Effect: Allow
+              Action: [dynamodb:GetItem, dynamodb:Query]
+              Resource: !GetAtt FitnessDataTable.Arn
+              Condition:
+                ForAllValues:StringEquals:
+                  dynamodb:LeadingKeys:
+                    - USER#e2e-javaan-e2e
+                    - IDENTITY#E2E#javaan-e2e
+                    - E2E_ACCOUNT#javaan-e2e
+                    - WEB_CREDENTIAL#57a7ab21a8236710d7394ef494bb9cad99e8824eded7cfc14a7b0e9d48a5c07c
+            - Effect: Allow
+              Action: [dynamodb:PutItem, dynamodb:UpdateItem, dynamodb:TransactWriteItems]
+              Resource: !GetAtt FitnessDataTable.Arn
+              Condition:
+                ForAllValues:StringEquals:
+                  dynamodb:LeadingKeys: [USER#e2e-javaan-e2e]
+            - Effect: Allow
+              Action: [s3:GetObject, s3:DeleteObject]
+              Resource: !Sub '${NutritionLabImages.Arn}/nutrition-lab/*'
+            - Effect: Allow
+              Action: ssm:GetParameter
+              Resource: !Sub arn:${AWS::Partition}:ssm:${AWS::Region}:${AWS::AccountId}:parameter${OpenAIKeyParameterName}
+
+  NutritionLabLogGroup:
+    Type: AWS::Logs::LogGroup
+    Condition: NutritionLabEnabled
+    Properties:
+      LogGroupName: !Sub /aws/lambda/${NutritionLabFunction}
+      RetentionInDays: 14
+
   HttpApi:
     Type: AWS::Serverless::HttpApi
     Properties:
@@ -149,6 +231,12 @@ Resources:
       CodeUri: lambda_handlers/runtime
       Handler: api.handler
       Timeout: 15
+      Environment:
+        Variables:
+          STACK_NAME: !Ref 'AWS::StackName'
+          E2E_NUTRITION_LAB_ENABLED: !If [NutritionLabEnabled, 'true', 'false']
+          E2E_NUTRITION_LAB_BUCKET: !If [NutritionLabEnabled, !Ref NutritionLabImages, '']
+          E2E_NUTRITION_LAB_FUNCTION: !If [NutritionLabEnabled, !Ref NutritionLabFunction, '']
       Events:
         ApiRoot:
           Type: HttpApi
@@ -166,6 +254,17 @@ Resources:
             PayloadFormatVersion: '2.0'
       Policies:
         - AWSLambdaBasicExecutionRole
+        - !If
+          - NutritionLabEnabled
+          - Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action: s3:PutObject
+                Resource: !Sub '${NutritionLabImages.Arn}/nutrition-lab/*'
+              - Effect: Allow
+                Action: lambda:InvokeFunction
+                Resource: !GetAtt NutritionLabFunction.Arn
+          - !Ref 'AWS::NoValue'
         - Version: '2012-10-17'
           Statement:
             - Effect: Allow
