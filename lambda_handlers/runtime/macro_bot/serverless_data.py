@@ -219,6 +219,7 @@ def _estimate_payload(estimate: MealEstimate) -> dict[str, Any]:
                 "name": item.name,
                 "portion_g": item.portion_g,
                 "assumptions": item.assumptions,
+                "assumption_categories": dict(item.assumption_categories),
                 "calories": item.calories,
                 "protein_g": item.protein_g,
                 "carbs_g": item.carbs_g,
@@ -233,6 +234,7 @@ def _estimate_payload(estimate: MealEstimate) -> dict[str, Any]:
         ],
         "variance_drivers": list(estimate.variance_drivers),
         "item_breakdown_complete": estimate.item_breakdown_complete,
+        "estimator_version": estimate.estimator_version,
         "reconciliation_status": estimate.reconciliation_status,
         "canonical_total": estimate.total_best.to_payload(),
     }
@@ -969,6 +971,7 @@ class DynamoNutritionRepository:
             "canonical_sk": canonical_sk,
             "estimate": original_payload,
             "model_metadata": dict(model_metadata or {}),
+            "estimator_version": estimate.estimator_version,
             "created_at": utc_iso(now),
         }
         item_operations: list[dict[str, Any]] = [
@@ -991,6 +994,7 @@ class DynamoNutritionRepository:
                             "name": item.name,
                             "portion_g": item.portion_g,
                             "assumptions": item.assumptions,
+                            "assumption_categories": dict(item.assumption_categories),
                             "calories": item.calories,
                             "protein_g": item.protein_g,
                             "carbs_g": item.carbs_g,
@@ -1026,6 +1030,7 @@ class DynamoNutritionRepository:
             "action_expires_at": action_expires_at,
             "update_id": update_id,
             "model_metadata": dict(model_metadata or {}),
+            "estimator_version": estimate.estimator_version,
             **traceability,
         }
         item_operations.append(
@@ -1050,6 +1055,125 @@ class DynamoNutritionRepository:
             ),
         )
 
+    def set_correction_state(self, identity: ServerlessIdentity, token: str, state: str) -> PendingMealAction:
+        """Persist the current small correction menu for retry-safe callbacks."""
+
+        action = self.get_action(identity, token)
+        if action is None:
+            raise ActionNotFound("Meal action was not found")
+        now = self._now()
+        try:
+            self.table.update_item(
+                Key={"PK": identity.pk, "SK": f"ACTION#{token}"},
+                UpdateExpression="SET correction_state = :state, updated_at = :updated",
+                ConditionExpression=_pending_action_live_condition(),
+                ExpressionAttributeNames={"#status": "status"},
+                ExpressionAttributeValues=_to_storage({
+                    ":state": str(state or ""),
+                    ":updated": utc_iso(now),
+                    ":pending": "pending",
+                    ":now": epoch_seconds(now),
+                }),
+            )
+        except Exception as err:
+            if _is_conditional_failure(err):
+                raise ActionFinalized("Meal action is no longer pending") from err
+            raise
+        return self.get_action(identity, token) or action
+
+    def apply_correction(
+        self,
+        identity: ServerlessIdentity,
+        token: str,
+        correction_type: str,
+        correction_value: str,
+    ) -> PendingMealAction:
+        """Apply a deterministic correction and append immutable feedback."""
+
+        action = self.get_action(identity, token)
+        if action is None:
+            raise ActionNotFound("Meal action was not found")
+        now = self._now()
+        if int(getattr(action, "expires_at", 0) or 0) <= epoch_seconds(now):
+            raise ActionExpired("Meal action expired")
+        corrected = action.estimate.adjust_category(correction_type, correction_value)
+        if corrected == action.estimate:
+            raise ValueError("That correction does not apply to this estimate")
+        correction_id = uuid.uuid4().hex
+        normalized_type = str(correction_type).strip().lower()
+        normalized_value = str(correction_value).strip().lower()
+        correction_factor = {
+            ("portion", "smaller"): 0.8,
+            ("portion", "larger"): 1.2,
+        }.get((normalized_type, normalized_value), 1.0)
+        correction_item = {
+            "PK": identity.pk,
+            "SK": f"CORRECTION#{utc_iso(now)}#{correction_id}",
+            "entity_type": "meal_correction",
+            "correction_id": correction_id,
+            "meal_id": action.meal_id,
+            "action_token": token,
+            "telegram_user_id": identity.telegram_user_id,
+            "correction_type": normalized_type,
+            "correction_value": normalized_value,
+            "original_estimate": _estimate_payload(action.original_estimate or action.estimate),
+            "resulting_estimate": _estimate_payload(corrected),
+            "original_adjustment_factor": action.adjustment_factor,
+            "resulting_adjustment_factor": action.adjustment_factor * correction_factor,
+            "created_at": utc_iso(now),
+            "final_status": "pending",
+            "estimator_version": (action.original_estimate or action.estimate).estimator_version,
+        }
+        updated_action = {
+            "operation": "Update",
+            "TableName": self.table_name,
+            "Key": {"PK": identity.pk, "SK": f"ACTION#{token}"},
+            "UpdateExpression": "SET estimate = :estimate, adjustment_factor = :factor, correction_state = :state, updated_at = :updated",
+            "ConditionExpression": _pending_action_live_condition(),
+            "ExpressionAttributeNames": {"#status": "status"},
+            "ExpressionAttributeValues": {
+                ":estimate": _estimate_payload(corrected),
+                ":factor": action.adjustment_factor * correction_factor,
+                ":state": "",
+                ":updated": utc_iso(now),
+                ":pending": "pending",
+                ":now": epoch_seconds(now),
+            },
+        }
+        try:
+            self._transact_write([
+                updated_action,
+                {"operation": "Put", "TableName": self.table_name, "Item": correction_item, "ConditionExpression": "attribute_not_exists(PK)"},
+            ])
+        except Exception as err:
+            if _is_conditional_failure(err):
+                raise ActionFinalized("Meal action is no longer pending") from err
+            raise
+        return self.get_action(identity, token) or action
+
+    def list_corrections(self, identity: ServerlessIdentity, limit: int = 100) -> list[dict[str, Any]]:
+        items = self._query(
+            Key("PK").eq(identity.pk) & Key("SK").begins_with("CORRECTION#"),
+            ScanIndexForward=False,
+            Limit=max(1, int(limit)),
+        )
+        return [_from_storage(item) for item in items]
+
+    def finalize_correction_feedback(self, identity: ServerlessIdentity, token: str, status: str) -> None:
+        """Annotate correction records after the action's atomic finalization."""
+
+        for item in self.list_corrections(identity, limit=100):
+            if item.get("action_token") != token or item.get("final_status") != "pending":
+                continue
+            try:
+                self.table.update_item(
+                    Key={"PK": identity.pk, "SK": item["SK"]},
+                    UpdateExpression="SET final_status = :status, finalized_at = :at",
+                    ExpressionAttributeValues=_to_storage({":status": str(status), ":at": utc_iso(self._now())}),
+                )
+            except Exception:
+                logger.warning("correction_feedback_finalize_failed", exc_info=True)
+
     def get_action(self, identity: ServerlessIdentity, token: str) -> Optional[PendingMealAction]:
         item = self._get({"PK": identity.pk, "SK": f"ACTION#{token}"})
         if not item:
@@ -1071,6 +1195,8 @@ class DynamoNutritionRepository:
     def scale_action(self, identity: ServerlessIdentity, token: str, factor: float) -> PendingMealAction:
         if factor <= 0:
             raise ValueError("scale factor must be positive")
+        if factor in {0.8, 1.2}:
+            return self.apply_correction(identity, token, "portion", "smaller" if factor < 1 else "larger")
         action = self.get_action(identity, token)
         if action is None:
             raise ActionNotFound("Meal action was not found")
@@ -1112,6 +1238,7 @@ class DynamoNutritionRepository:
             raise ActionNotFound("Meal action was not found")
         current_status = _action_status(action)
         if current_status in {"confirmed", "cancelled"}:
+            self.finalize_correction_feedback(identity, token, current_status)
             return FinalizeResult(current_status, action, self.get_meal(identity, action.meal_id), duplicate=True)
         now = self._now()
         new_status = "confirmed" if operation == "confirm" else "cancelled"
@@ -1163,6 +1290,7 @@ class DynamoNutritionRepository:
                 raise ActionExpired("Meal action expired") from err
             raise ActionFinalized("Meal action is no longer pending") from err
         finalized = self.get_action(identity, token) or action
+        self.finalize_correction_feedback(identity, token, new_status)
         return FinalizeResult(new_status, finalized, self.get_meal(identity, action.meal_id), duplicate=False)
 
     def auto_confirm_expired_action(self, identity: ServerlessIdentity, token: str) -> FinalizeResult:
@@ -1228,6 +1356,7 @@ class DynamoNutritionRepository:
                 return FinalizeResult(_action_status(latest), latest, self.get_meal(identity, latest.meal_id), duplicate=True)
             raise ActionFinalized("Meal action was finalized concurrently") from err
         finalized = self.get_action(identity, token) or action
+        self.finalize_correction_feedback(identity, token, "confirmed")
         return FinalizeResult("confirmed", finalized, self.get_meal(identity, action.meal_id), duplicate=False)
 
     def expire_pending_actions(self, *, limit: int = 100) -> list[PendingMealAction]:
@@ -1315,17 +1444,35 @@ class DynamoNutritionRepository:
         return DailyMacroSummary(identity.telegram_user_id, target_date.isoformat(), totals, rows)
 
     def persona_hint(self, identity: ServerlessIdentity, caption: str) -> str:
-        normalized = _normalize_caption(caption)
-        if not normalized:
+        """Return a bounded, confirmed-correction context for this user only."""
+
+        del caption  # Current caption is stronger evidence and is supplied separately.
+        counts: dict[tuple[str, str], int] = {}
+        for correction in self.list_corrections(identity, limit=100):
+            if correction.get("final_status") != "confirmed":
+                continue
+            key = (str(correction.get("correction_type", "")), str(correction.get("correction_value", "")))
+            if key[0] and key[1]:
+                counts[key] = counts.get(key, 0) + 1
+        priors = []
+        labels = {
+            ("base", "half"): "similar meals often have half the usual base portion",
+            ("skin", "removed"): "chicken skin is usually removed",
+            ("sauce", "light"): "sauce/oil is usually light",
+            ("sauce", "heavy"): "sauce/oil is usually heavy",
+        }
+        for key, count in sorted(counts.items(), key=lambda entry: (-entry[1], entry[0])):
+            if count < 2:
+                continue
+            label = labels.get(key, f"repeated correction: {key[0]}={key[1]}")
+            priors.append(f"{label} ({count} confirmed examples)")
+        if not priors:
             return ""
-        for meal in reversed(self.list_recent_meals(identity, limit=20)):
-            if _normalize_caption(meal.caption) == normalized:
-                return (
-                    "Similar prior meal detected. Prior estimate context: "
-                    f"meal={meal.original_estimate.meal_name}, calories={int(round(meal.macros.calories))} kcal. "
-                    "Use this as a soft prior only if image appears similar."
-                )
-        return ""
+        return (
+            "Historical weak priors (current image/caption override these): "
+            + "; ".join(priors[:3])
+            + ". Use only when the current meal appears similar."
+        )
 
 
 def _action_status(action: PendingMealAction) -> str:
@@ -1372,6 +1519,7 @@ def _action_from_item(item: Mapping[str, Any]) -> PendingMealAction:
         canonical_sk=str(plain.get("canonical_sk", "")) or None,
         expires_at=int(plain.get("action_expires_at", plain.get("expires_at", 0)) or 0),
         original_estimate=_estimate_from_payload(plain["original_estimate"]) if plain.get("original_estimate") else None,
+        correction_state=str(plain.get("correction_state", "") or ""),
     )
 
 

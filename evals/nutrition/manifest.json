@@ -1,0 +1,13 @@
+[
+  {
+    "id": "astons-all-day-breakfast-001",
+    "image": "../../images/6143401176322477320.jpg",
+    "caption": "Astons All Day breakfast",
+    "label_status": "unlabelled",
+    "expected_visible_components": [],
+    "known_portions_g": {},
+    "acceptable_macro_range": {},
+    "follow_up_expected": null,
+    "notes": "Retained photo has no defensible component- or macro-level ground truth. Use for optional live smoke/structural checks only."
+  }
+]

@@ -12,14 +12,40 @@ def parse_meal_datetime(raw_text: str, fmt: str) -> datetime:
 
 def build_meal_keyboard(token: str) -> InlineKeyboardMarkup:
     keyboard = [
-        [InlineKeyboardButton("✅ Log", callback_data=f"meal:v1:confirm:{token}")],
+        [InlineKeyboardButton("✅ Looks right", callback_data=f"meal:v1:confirm:{token}")],
+        [InlineKeyboardButton("✏️ Adjust", callback_data=f"meal:v1:adjust:{token}")],
         [
-            InlineKeyboardButton("⬇️ -20%", callback_data=f"meal:v1:smaller:{token}"),
-            InlineKeyboardButton("⬆️ +20%", callback_data=f"meal:v1:larger:{token}"),
+            InlineKeyboardButton("⬇️ Smaller", callback_data=f"meal:v1:smaller:{token}"),
+            InlineKeyboardButton("⬆️ Larger", callback_data=f"meal:v1:larger:{token}"),
         ],
         [InlineKeyboardButton("❌ Cancel", callback_data=f"meal:v1:cancel:{token}")],
     ]
     return InlineKeyboardMarkup(keyboard)
+
+
+def build_adjustment_keyboard(action: PendingMealAction) -> InlineKeyboardMarkup:
+    """Expose only corrections relevant to the current estimate."""
+
+    names = " ".join(item.name.lower() for item in action.estimate.items)
+    rows = []
+    if any(term in names for term in ("rice", "noodle", "pasta", "bread", "roti", "chapati", "grain")):
+        rows.append([
+            InlineKeyboardButton("Base: half", callback_data=f"meal:v1:fix:base:half:{action.token}"),
+            InlineKeyboardButton("Base: less", callback_data=f"meal:v1:fix:base:less:{action.token}"),
+        ])
+    if any(term in names for term in ("chicken", "duck")):
+        rows.append([InlineKeyboardButton("Chicken skin removed", callback_data=f"meal:v1:fix:skin:removed:{action.token}")])
+    if any(term in names for term in ("sauce", "gravy", "dressing", "oil", "curry")):
+        rows.append([
+            InlineKeyboardButton("Sauce/oil: light", callback_data=f"meal:v1:fix:sauce:light:{action.token}"),
+            InlineKeyboardButton("Sauce/oil: heavy", callback_data=f"meal:v1:fix:sauce:heavy:{action.token}"),
+        ])
+    rows.append([
+        InlineKeyboardButton("Whole portion smaller", callback_data=f"meal:v1:fix:portion:smaller:{action.token}"),
+        InlineKeyboardButton("Whole portion larger", callback_data=f"meal:v1:fix:portion:larger:{action.token}"),
+    ])
+    rows.append([InlineKeyboardButton("↩️ Back", callback_data=f"meal:v1:back:{action.token}")])
+    return InlineKeyboardMarkup(rows)
 
 
 def build_setup_keyboard(url: str) -> InlineKeyboardMarkup:
@@ -65,20 +91,33 @@ def format_macro_message(estimate: MealEstimate) -> str:
         if estimate.variance_drivers
         else ""
     )
-    return (
+    item_lines = []
+    for item in estimate.items[:4]:
+        item_line = f"• {item.name[:60]}: ~{int(round(item.portion_g))}g · {int(round(item.calories))} kcal"
+        if item.protein_g >= 10:
+            item_line += f" · {item.protein_g:.0f}g protein"
+        item_lines.append(item_line)
+    if len(estimate.items) > 4:
+        item_lines.append(f"• +{len(estimate.items) - 4} smaller component(s)")
+    assumptions = estimate.assumptions_summary()
+    assumption_details = estimate.assumptions_detail(max_lines=3)
+    message = (
         "🍽️ Macro estimate\n"
-        f"- Meal: {estimate.meal_name}\n"
+        f"- Meal: {estimate.meal_name[:160]}\n"
         f"- Calories: {int(round(float(estimate.calories)))} kcal\n"
         f"- Protein: {float(estimate.protein_g):.1f} g\n"
         f"- Carbs: {float(estimate.carbs_g):.1f} g\n"
         f"- Fat: {float(estimate.fat_g):.1f} g\n"
         f"{range_line}\n"
-        f"- Assumptions: {estimate.assumptions_summary()}\n"
-        f"{uncertainty}"
-        f"- Confidence: {int(float(estimate.confidence) * 100)}%\n"
-        f"{follow_up}"
-        "Controls: ⬇️ -20% / ⬆️ +20% then ✅ Log"
+        + ("Items:\n" + "\n".join(item_lines) + "\n" if item_lines else "")
+        + f"- Assumptions: {assumptions}\n"
+        + ("What I'm assuming:\n" + "\n".join(f"• {line}" for line in assumption_details) + "\n" if assumption_details else "")
+        + f"{uncertainty}"
+        + f"- Confidence: {int(float(estimate.confidence) * 100)}%\n"
+        + f"{follow_up}"
+        + "Choose ✅ Looks right, or ✏️ Adjust if one assumption is off."
     )
+    return message if len(message) <= 4000 else message[:3990].rstrip() + "…"
 
 
 def format_pending_message(action: PendingMealAction) -> str:
@@ -132,7 +171,8 @@ def format_recommendation_message(result: RecommendationResult) -> str:
             ]
         )
 
-    return "\n".join(lines)
+    message = "\n".join(lines)
+    return message if len(message) <= 4000 else message[:3990].rstrip() + "…"
 
 
 def format_profile_setup_message(setup_url: str) -> str:

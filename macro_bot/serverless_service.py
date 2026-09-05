@@ -17,7 +17,7 @@ from .profile_targets import (
     derive_daily_target,
     questionnaire_meta_payload,
 )
-from .recommendations import RecommendationPlanner
+from .recommendations import RecommendationPlanner, ServerlessRecommendationClient
 from .serverless_data import (
     DEFAULT_TIMEZONE,
     ActionNotFound,
@@ -103,7 +103,7 @@ class NutritionService:
             _DynamoMealLogRepository(repository),
             _DynamoProfileStore(repository),
             self.catalog_store,
-            recommendation_client=None,
+            recommendation_client=ServerlessRecommendationClient(),
         )
         self.workout_execution = WorkoutExecutionRepository(repository)
 
@@ -346,6 +346,15 @@ class NutritionService:
         local_now = self._now().astimezone(ZoneInfo(timezone_name))
         return local_now.astimezone(timezone.utc)
 
+    def should_recommend_after_meal(self, identity: ServerlessIdentity, eaten_at: Optional[str]) -> bool:
+        """Suppress a misleading current-day recommendation for historical logs."""
+
+        if not eaten_at:
+            return True
+        profile = self.repository.get_profile(identity.user_id)
+        timezone_name = profile.timezone if profile else DEFAULT_TIMEZONE
+        return parse_utc(eaten_at).astimezone(ZoneInfo(timezone_name)).date() == self._local_date(identity)
+
     # ---- Telegram workflow use cases ------------------------------------------
 
     def begin_logmeal(self, identity: ServerlessIdentity) -> None:
@@ -389,6 +398,12 @@ class NutritionService:
     def scale_action(self, identity: ServerlessIdentity, token: str, factor: float):
         return self.repository.scale_action(identity, token, factor)
 
+    def set_correction_state(self, identity: ServerlessIdentity, token: str, state: str):
+        return self.repository.set_correction_state(identity, token, state)
+
+    def apply_correction(self, identity: ServerlessIdentity, token: str, correction_type: str, correction_value: str):
+        return self.repository.apply_correction(identity, token, correction_type, correction_value)
+
     def finalize_action(self, identity: ServerlessIdentity, token: str, operation: str):
         return self.repository.finalize_action(identity, token, operation)
 
@@ -404,6 +419,14 @@ class NutritionService:
         if prepared.skip_reason:
             return self._planner.build_skip_result(prepared), prepared
         return self._planner.build_fallback_result(prepared), prepared
+
+    async def recommendation_async(self, identity: ServerlessIdentity):
+        """Use catalogue-only LLM ranking with deterministic fallback."""
+
+        return await self._planner.recommend_next_meal(
+            identity.telegram_user_id,
+            target_date=self._local_date(identity),
+        )
 
 
 def _meal_to_logged_row(meal: StoredMeal):

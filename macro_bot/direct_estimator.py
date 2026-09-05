@@ -18,12 +18,13 @@ from typing import Any, Callable, Dict, Optional
 
 from PIL import Image
 
-from .models import ITEM_EVIDENCE_LEVELS, MacroTotal, MealEstimate
+from .models import ASSUMPTION_KEYS, ESTIMATOR_VERSION, ITEM_EVIDENCE_LEVELS, MacroTotal, MealEstimate
 from .serverless_auth import SSMParameterCache, openai_key_from_environment
 
 logger = logging.getLogger(__name__)
 
 MODEL = "gpt-5.4"
+ESTIMATOR_APPLICATION_VERSION = ESTIMATOR_VERSION
 VISION_DETAIL = "high"
 VISION_MAX_SIDE = 768
 MAX_UPLOAD_BYTES = 6_000_000
@@ -46,7 +47,7 @@ PORTION_REFERENCE_GUIDELINES = [
 ]
 
 PROMPT_TEMPLATE = (
-    "You are a nutrition analyst. Analyze the meal in the image and caption.\n"
+    "You are a careful nutrition analyst for real-world meal photos, including Singaporean, Indian, and Asian meals. Analyze the meal in the image and caption.\n"
     "Follow this process exactly:\n"
     "1) Identify all visible food items.\n"
     "2) Estimate portion size in grams using standard serving references.\n"
@@ -55,17 +56,20 @@ PROMPT_TEMPLATE = (
     "5) Provide total macros with best estimate, low estimate, and high estimate.\n"
     "6) Provide variance drivers for the range (portion size, oil/fat, sauces, hidden ingredients).\n"
     "7) Classify each component by visual evidence and separately score food identification, portion, and macro confidence.\n"
+    "8) Separate explicit caption facts, visible observations, and weak inferences.\n"
     "\n"
     "Portion reference guidelines:\n"
     "- {portion_guidelines}\n"
     "\n"
     "Oil rules:\n"
-    "- If foods appear fried, assume 1-2 tsp cooking oil unless clearly low-oil.\n"
-    "- If fried rice appears, assume 1 tbsp oil unless caption says otherwise.\n"
+    "- If foods appear fried, estimate absorbed oil, but widen the range when the amount is not visible.\n"
+    "- Do not apply cuisine stereotypes automatically: a curry, rice, noodle, egg, chicken, gravy, sauce, beverage, or fried item must be supported by the current image/caption.\n"
     "- Account explicitly for visible creamy or oily sauce; widen the range when its quantity is unclear.\n"
     "- Treat hidden cooking oil as an uncertainty driver rather than silently adding it or ignoring it.\n"
     "\n"
     "Visual grounding rules:\n"
+    "- Evidence hierarchy: (1) explicit user caption facts, (2) clear current image evidence, (3) visually plausible inference, (4) historical priors only as weak priors. Never let a historical prior override current evidence.\n"
+    "- Caption facts such as grams, number of eggs, half rice, skin removed, no sauce, or little oil materially change the estimate and must not trigger a duplicate question.\n"
     "- Identify only food components visually supported by the image.\n"
     "- If a component is hidden or ambiguous, mark it as inferred, partially_occluded, or uncertain.\n"
     "- Do not confidently assert a hidden noodle/rice base, egg, topping, or sauce merely because it is common for the meal category.\n"
@@ -73,6 +77,7 @@ PROMPT_TEMPLATE = (
     "- For each major component, provide portion_low_g, portion_g, and portion_high_g; widen this range when depth or occlusion prevents precision.\n"
     "- Set item_breakdown_complete=false when hidden ingredients, aggregate-only oil, or an incomplete item list cannot be assigned to items.\n"
     "- Set item_breakdown_complete=true only when the listed items cover the estimated meal contribution.\n"
+    "- For each item, fill assumption_categories for food_identity, portion, cooking_method, oil_fat, sauce_dressing, and hidden_ingredients. Use null when not applicable.\n"
     "\n"
     "Output requirements:\n"
     "- Return structured JSON only following the provided schema.\n"
@@ -83,6 +88,7 @@ PROMPT_TEMPLATE = (
     "- Do not invent a follow-up question; the application will add one deterministically only for high-impact ambiguity.\n"
     "\n"
     "Caption: {caption}\n"
+    "Caption facts parsed by the application: {caption_facts}\n"
     "Persona context (optional): {persona_hint}\n"
 )
 
@@ -105,6 +111,12 @@ MEAL_ITEM_SCHEMA: Dict[str, Any] = {
         "name": {"type": "string"},
         "portion_g": {"type": "number"},
         "assumptions": {"type": "string"},
+        "assumption_categories": {
+            "type": "object",
+            "additionalProperties": False,
+            "properties": {key: {"type": ["string", "null"]} for key in ASSUMPTION_KEYS},
+            "required": list(ASSUMPTION_KEYS),
+        },
         "calories": {"type": "number"},
         "protein_g": {"type": "number"},
         "carbs_g": {"type": "number"},
@@ -116,7 +128,7 @@ MEAL_ITEM_SCHEMA: Dict[str, Any] = {
         "evidence": {"type": "string", "enum": sorted(ITEM_EVIDENCE_LEVELS)},
     },
     "required": [
-        "name", "portion_g", "assumptions", "calories", "protein_g", "carbs_g", "fat_g",
+        "name", "portion_g", "assumptions", "assumption_categories", "calories", "protein_g", "carbs_g", "fat_g",
         "portion_low_g", "portion_high_g", "identification_confidence", "portion_confidence", "evidence",
     ],
 }
@@ -141,11 +153,12 @@ MEAL_MACRO_SCHEMA: Dict[str, Any] = {
         "variance_drivers": {"type": "array", "items": {"type": "string"}, "minItems": 1},
         "confidence": {"type": "number", "minimum": 0, "maximum": 1},
         "notes": {"type": "string"},
+        "estimator_version": {"type": "string"},
     },
     "required": [
         "meal_name", "calories", "protein_g", "carbs_g", "fat_g", "total_best",
         "total_low", "total_high", "items", "variance_drivers", "confidence", "notes",
-        "identification_confidence", "portion_confidence", "macro_confidence", "item_breakdown_complete",
+        "identification_confidence", "portion_confidence", "macro_confidence", "item_breakdown_complete", "estimator_version",
     ],
 }
 
@@ -244,22 +257,57 @@ def _needs_follow_up(item: dict[str, Any]) -> bool:
     return True
 
 
+def extract_caption_facts(caption: str) -> list[str]:
+    """Extract explicit high-signal facts without inferring user habits."""
+
+    import re
+
+    text = " ".join(str(caption or "").lower().split())
+    facts: list[str] = []
+    if any(term in text for term in ("skin removed", "without skin", "no skin")):
+        facts.append("skin_removed")
+    if "no sauce" in text or "without sauce" in text:
+        facts.append("no_sauce")
+    if "little oil" in text or "low oil" in text:
+        facts.append("low_oil")
+    if "half rice" in text or "half portion rice" in text:
+        facts.append("half_rice")
+    if "half noodles" in text or "half portion noodles" in text:
+        facts.append("half_noodles")
+    for match in re.finditer(r"(\d+(?:\.\d+)?)\s*g\s+(?:of\s+)?([a-z][a-z ]{1,30})", text):
+        facts.append(f"{match.group(2).strip()}={match.group(1)}g")
+    egg_match = re.search(r"(\d+)\s+eggs?\b", text)
+    if egg_match:
+        facts.append(f"eggs={egg_match.group(1)}")
+    return facts[:8]
+
+
+def _uncertainty_impact(item: dict[str, Any]) -> float:
+    low = item.get("portion_low_g")
+    high = item.get("portion_high_g")
+    if low is None or high is None:
+        return 0.0
+    width = max(0.0, float(high) - float(low))
+    portion = max(float(item.get("portion_g", 1.0)), 1.0)
+    return width * max(0.1, float(item.get("calories", 0.0)) / portion)
+
+
 def _follow_up_question(result: dict[str, Any]) -> Optional[str]:
     base_terms = ("noodle", "rice", "pasta", "grain", "soba", "couscous", "quinoa")
     sauce_terms = ("sauce", "mayo", "mayonnaise", "dressing", "oil", "glaze", "cheese", "nuts")
     for item in result["items"]:
         name = str(item.get("name", "")).lower()
-        if any(term in name for term in base_terms) and _needs_follow_up(item):
+        if any(term in name for term in base_terms) and _needs_follow_up(item) and _uncertainty_impact(item) >= 80:
             return "I can’t clearly see the base under the toppings. Is there noodles, rice, or another grain underneath?"
     for item in result["items"]:
         name = str(item.get("name", "")).lower()
-        if any(term in name for term in sauce_terms) and _needs_follow_up(item):
+        if any(term in name for term in sauce_terms) and _needs_follow_up(item) and _uncertainty_impact(item) >= 50:
             return "How much sauce or dressing was added: a light drizzle or a generous serving?"
     if not result.get("item_breakdown_complete", True):
         drivers = " ".join(str(value).lower() for value in result.get("variance_drivers", []))
-        if any(term in drivers for term in base_terms):
+        if any(term in drivers for term in base_terms) and any(_uncertainty_impact(item) >= 80 for item in result["items"]):
             return "I can’t fully account for a hidden base. Is there noodles, rice, or another grain underneath?"
-        if any(term in drivers for term in sauce_terms):
+        if any(term in drivers for term in sauce_terms) and any(_uncertainty_impact(item) >= 50 for item in result["items"]):
             return "How much sauce or dressing was added: a light drizzle or a generous serving?"
     return None
 
@@ -352,6 +400,7 @@ def validate_result(result: dict[str, Any]) -> dict[str, Any]:
     result["fat_g"] = round(float(result["total_best"]["fat_g"]), 1)
     result["confidence"] = confidence
     result["notes"] = str(result.get("notes", ""))
+    result["estimator_version"] = str(result.get("estimator_version", ESTIMATOR_APPLICATION_VERSION) or ESTIMATOR_APPLICATION_VERSION)
     for confidence_name in ("identification_confidence", "portion_confidence", "macro_confidence"):
         confidence_value = result.get(confidence_name)
         if confidence_value is not None:
@@ -372,6 +421,11 @@ def validate_result(result: dict[str, Any]) -> dict[str, Any]:
             "name": str(item["name"]),
             "portion_g": round(float(item["portion_g"]), 1),
             "assumptions": str(item["assumptions"]),
+            "assumption_categories": {
+                key: str(value)
+                for key, value in (item.get("assumption_categories") if isinstance(item.get("assumption_categories"), dict) else {}).items()
+                if key in ASSUMPTION_KEYS and value not in (None, "")
+            },
             "calories": int(round(float(item["calories"]))),
             "protein_g": round(float(item["protein_g"]), 1),
             "carbs_g": round(float(item["carbs_g"]), 1),
@@ -459,6 +513,7 @@ class DirectOpenAIEstimator:
         prompt = PROMPT_TEMPLATE.format(
             caption=str(caption or "")[:1000],
             persona_hint=str(persona_hint or "none")[:1000],
+            caption_facts=", ".join(extract_caption_facts(caption)) or "none",
             portion_guidelines="\n- ".join(PORTION_REFERENCE_GUIDELINES),
         )
         encoded = base64.b64encode(resized).decode("ascii")
@@ -527,6 +582,6 @@ class DirectOpenAIEstimator:
             return EstimationResult(
                 estimate=MealEstimate.from_api_payload(validated),
                 model=self._model,
-                usage=_extract_usage(response),
+                usage={**_extract_usage(response), "estimator_version": ESTIMATOR_APPLICATION_VERSION},
             )
         raise DirectEstimationError(f"OpenAI estimation failed: {str(last_error)[:120]}")

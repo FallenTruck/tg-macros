@@ -1,7 +1,11 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+import asyncio
+import json
+import os
+from dataclasses import dataclass, field
 from datetime import date, datetime
+from zoneinfo import ZoneInfo
 from typing import TYPE_CHECKING, List, Sequence
 
 from .models import (
@@ -21,6 +25,102 @@ if TYPE_CHECKING:
     from .storage import FoodCatalogStore, MealLogRepository, UserProfileStore
 
 
+RECOMMENDATION_VERSION = "nutrition-recommendation-v2"
+RECOMMENDATION_SELECTION_SCHEMA = {
+    "type": "object",
+    "additionalProperties": False,
+    "properties": {
+        "summary": {"type": "string"},
+        "suggestions": {
+            "type": "array",
+            "minItems": 1,
+            "maxItems": 3,
+            "items": {
+                "type": "object",
+                "additionalProperties": False,
+                "properties": {
+                    "candidate_id": {"type": "string"},
+                    "reason": {"type": "string"},
+                    "tradeoff": {"type": "string"},
+                },
+                "required": ["candidate_id", "reason", "tradeoff"],
+            },
+        },
+    },
+    "required": ["summary", "suggestions"],
+}
+
+
+class ServerlessRecommendationClient:
+    """Catalogue-only LLM ranking; application data remains authoritative."""
+
+    def __init__(self, *, model: str | None = None, timeout_seconds: float = 20.0):
+        self.model = model or os.getenv("OPENAI_RECOMMEND_MODEL", "gpt-4.1-mini")
+        self.timeout_seconds = timeout_seconds
+
+    async def recommend(self, request: RecommendationRequest) -> RecommendationResult:
+        from .serverless_auth import SSMParameterCache, openai_key_from_environment
+
+        def call() -> RecommendationResult:
+            from openai import OpenAI
+
+            client = OpenAI(
+                api_key=openai_key_from_environment(SSMParameterCache()),
+                timeout=self.timeout_seconds,
+                max_retries=0,
+            )
+            candidates = {candidate.food_id: candidate for candidate in request.candidate_foods}
+            candidate_lines = "\n".join(
+                f"{candidate.food_id}: {candidate.name} ({candidate.serving}) | {candidate.calories:.0f} kcal | P {candidate.protein_g:.0f} C {candidate.carbs_g:.0f} F {candidate.fat_g:.0f}"
+                for candidate in request.candidate_foods
+            )
+            prompt = (
+                "Rank the supplied catalogue candidates for the user's next eating occasion. "
+                "Return candidate IDs only; never invent nutrition values or foods. "
+                "Hard restrictions have already been filtered. Prioritize macro fit, then restriction compliance, "
+                "then reasonable diversity, then preferences. Consider earlier meals, protein/fat gaps, local time, "
+                "and whether the remaining intake should be spread across later occasions. Keep explanations concise.\n"
+                f"Today totals: {request.today_totals.to_payload()}\n"
+                f"Remaining: {request.remaining.remaining.to_payload()}\n"
+                f"Earlier today: {json.dumps(request.today_meals[:6], ensure_ascii=True)}\n"
+                f"Local time: {request.local_time or 'unknown'}\n"
+                "Strategy signal: application-derived protein, carb, and fat priorities\n"
+                f"Candidates:\n{candidate_lines}"
+            )
+            response = client.responses.create(
+                model=self.model,
+                input=[{"role": "user", "content": [{"type": "input_text", "text": prompt}]}],
+                text={"format": {"type": "json_schema", "name": "meal_recommendations", "schema": RECOMMENDATION_SELECTION_SCHEMA, "strict": True}},
+            )
+            payload = json.loads(getattr(response, "output_text", ""))
+            if not isinstance(payload, dict) or not isinstance(payload.get("suggestions"), list):
+                raise ValueError("invalid recommendation output")
+            suggestions = []
+            seen = set()
+            for raw in payload["suggestions"][:3]:
+                candidate_id = str(raw.get("candidate_id", ""))
+                if candidate_id in seen or candidate_id not in candidates:
+                    raise ValueError("recommendation referenced an invalid candidate")
+                seen.add(candidate_id)
+                candidate = candidates[candidate_id]
+                suggestions.append(RecommendedMeal.from_candidate(
+                    candidate,
+                    fit_rationale=str(raw.get("reason", ""))[:180],
+                    tradeoffs=str(raw.get("tradeoff", ""))[:180],
+                ))
+            if not suggestions:
+                raise ValueError("recommendation returned no valid candidates")
+            return RecommendationResult(
+                summary=str(payload.get("summary", ""))[:240],
+                today_totals=request.today_totals,
+                remaining_macros=request.remaining.remaining,
+                suggestions=suggestions,
+                source="model_ranked",
+            )
+
+        return await asyncio.wait_for(asyncio.to_thread(call), timeout=self.timeout_seconds + 2.0)
+
+
 @dataclass(frozen=True)
 class PreparedRecommendation:
     profile: UserProfile
@@ -28,6 +128,8 @@ class PreparedRecommendation:
     remaining: RemainingMacros
     recent_meals: List[str]
     candidate_foods: List[CandidateFood]
+    today_meals: List[dict] = field(default_factory=list)
+    local_time: str = ""
 
     @property
     def skip_reason(self) -> str:
@@ -38,6 +140,18 @@ class PreparedRecommendation:
         if not self.candidate_foods:
             return "No suitable meal suggestions are available for your current targets."
         return ""
+
+    @property
+    def strategy_signal(self) -> str:
+        remaining = self.remaining.remaining
+        signals = []
+        if remaining.protein_g >= 30:
+            signals.append("protein is the biggest gap")
+        if remaining.fat_g < 15:
+            signals.append("fat is constrained")
+        if self.daily_summary.totals.carbs_g > self.remaining.target.carbs_g * 0.65:
+            signals.append("earlier meals were carb-heavy")
+        return "; ".join(signals) or "balanced macro coverage"
 
 
 class RecommendationPlanner:
@@ -54,8 +168,9 @@ class RecommendationPlanner:
         self._recommendation_client = recommendation_client
 
     def prepare(self, telegram_user_id: int, target_date: date | None = None) -> PreparedRecommendation:
-        active_date = target_date or datetime.now().date()
         profile = self._profile_store.get(telegram_user_id)
+        local_now = datetime.now(ZoneInfo(profile.timezone))
+        active_date = target_date or local_now.date()
         daily_summary = self._meal_log_repository.get_daily_summary(telegram_user_id, active_date)
         remaining = RemainingMacros.from_target_and_consumed(profile.daily_target, daily_summary.totals)
         recent_logged_meals = self._meal_log_repository.list_recent_meals(telegram_user_id, limit=6)
@@ -65,6 +180,7 @@ class RecommendationPlanner:
             profile=profile,
             remaining=remaining,
             recent_meals=recent_meals,
+            today_meals=daily_summary.meals,
         )
         return PreparedRecommendation(
             profile=profile,
@@ -72,6 +188,11 @@ class RecommendationPlanner:
             remaining=remaining,
             recent_meals=recent_meals,
             candidate_foods=candidate_foods,
+            today_meals=[
+                {"caption": meal.caption, "calories": meal.calories, "protein_g": meal.protein_g, "carbs_g": meal.carbs_g, "fat_g": meal.fat_g}
+                for meal in daily_summary.meals
+            ],
+            local_time=local_now.isoformat(timespec="minutes"),
         )
 
     async def recommend_next_meal(
@@ -90,10 +211,14 @@ class RecommendationPlanner:
             remaining=prepared.remaining,
             recent_meals=prepared.recent_meals,
             candidate_foods=prepared.candidate_foods,
+            today_meals=prepared.today_meals or [],
+            local_time=prepared.local_time,
         )
         try:
+            if self._recommendation_client is None:
+                raise RuntimeError("recommendation client unavailable")
             result = await self._recommendation_client.recommend(request)
-        except _recommendation_error():
+        except Exception:
             result = self.build_fallback_result(prepared)
         return result, prepared
 
@@ -137,6 +262,7 @@ class RecommendationPlanner:
         profile: UserProfile,
         remaining: RemainingMacros,
         recent_meals: Sequence[str],
+        today_meals: Sequence[object] = (),
     ) -> List[CandidateFood]:
         recent_text = " ".join(meal.lower() for meal in recent_meals)
         candidates: List[CandidateFood] = []
@@ -146,7 +272,7 @@ class RecommendationPlanner:
             if "vegetarian" in profile.restrictions and "vegetarian" not in entry.tags:
                 continue
 
-            fit_score, fit_reason = self._score_entry(entry, profile, remaining, recent_text)
+            fit_score, fit_reason = self._score_entry(entry, profile, remaining, recent_text, today_meals)
             if fit_score < -25:
                 continue
             candidates.append(CandidateFood.from_catalog(entry, fit_score=fit_score, fit_reason=fit_reason))
@@ -160,6 +286,7 @@ class RecommendationPlanner:
         profile: UserProfile,
         remaining: RemainingMacros,
         recent_text: str,
+        today_meals: Sequence[object] = (),
     ) -> tuple[float, str]:
         desired = self._desired_next_meal_macros(remaining.remaining)
         score = 0.0
@@ -176,6 +303,16 @@ class RecommendationPlanner:
         if remaining.remaining.calories > 0 and entry.macros.calories <= remaining.remaining.calories + 120:
             score += 10
             reasons.append("fits your remaining calories")
+        if remaining.remaining.protein_g >= 30 and entry.macros.protein_g < 20:
+            score -= 18
+        if remaining.remaining.fat_g < 15 and entry.macros.fat_g > remaining.remaining.fat_g + 8:
+            score -= 24
+            reasons.append("keeps fat closer to your remaining limit")
+        if today_meals:
+            daily_carbs = sum(float(getattr(meal, "carbs_g", 0.0)) for meal in today_meals)
+            if daily_carbs > remaining.target.carbs_g * 0.65 and entry.macros.carbs_g > 55:
+                score -= 14
+                reasons.append("avoids another carb-heavy option")
         if set(entry.cuisines) & set(profile.preferred_cuisines):
             score += 8
             reasons.append("matches your usual cuisine")
@@ -214,13 +351,14 @@ class RecommendationPlanner:
     def _repeat_penalty(entry: FoodCatalogEntry, recent_text: str) -> float:
         tokens = [token for token in entry.name.lower().replace("-", " ").split() if len(token) > 3]
         overlap = sum(1 for token in tokens if token in recent_text)
-        return float(overlap * 8)
+        return float(overlap * 18)
 
     @staticmethod
     def _summary_line(prepared: PreparedRecommendation) -> str:
         remaining = prepared.remaining.remaining
+        signal = prepared.strategy_signal
         return (
-            f"Today so far: {int(round(prepared.daily_summary.totals.calories))} kcal. "
+            f"{signal.capitalize()}. Today so far: {int(round(prepared.daily_summary.totals.calories))} kcal. "
             f"Remaining: {int(round(remaining.calories))} kcal, "
             f"{remaining.protein_g:.0f}g protein, {remaining.carbs_g:.0f}g carbs, {remaining.fat_g:.0f}g fat."
         )
@@ -235,7 +373,7 @@ class RecommendationPlanner:
         if candidate.protein_g < 20 and remaining.remaining.protein_g > 25:
             notes.append("protein top-up may still be needed later")
         if not notes:
-            notes.append("balanced enough for the next meal slot")
+            notes.append("best macro fit among the available options")
         return "; ".join(notes)
 
 

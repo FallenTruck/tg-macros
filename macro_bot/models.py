@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from datetime import datetime
 from typing import Dict, List, Optional
 
@@ -9,6 +9,8 @@ QUESTIONNAIRE_SEXES = {"male", "female"}
 QUESTIONNAIRE_GOALS = {"lose", "maintain", "gain"}
 QUESTIONNAIRE_ACTIVITY_LEVELS = {"sedentary", "light", "moderate", "active", "very_active"}
 ITEM_EVIDENCE_LEVELS = {"clearly_visible", "probably_visible", "partially_occluded", "inferred", "uncertain"}
+ASSUMPTION_KEYS = ("food_identity", "portion", "cooking_method", "oil_fat", "sauce_dressing", "hidden_ingredients")
+ESTIMATOR_VERSION = "nutrition-estimator-v2"
 
 
 @dataclass(frozen=True)
@@ -78,6 +80,7 @@ class MealItemEstimate:
     identification_confidence: Optional[float] = None
     portion_confidence: Optional[float] = None
     evidence: str = "uncertain"
+    assumption_categories: Dict[str, str] = field(default_factory=dict)
 
     @classmethod
     def from_payload(cls, payload: Dict[str, object]) -> "MealItemEstimate":
@@ -108,6 +111,10 @@ class MealItemEstimate:
             if portion_low_value > portion_high_value or not (portion_low_value <= portion <= portion_high_value):
                 raise ValueError("portion_g must be within portion_low_g and portion_high_g")
 
+        assumption_payload = payload.get("assumption_categories")
+        if not isinstance(assumption_payload, dict):
+            assumption_payload = {}
+
         return cls(
             name=str(payload["name"]),
             portion_g=portion,
@@ -121,6 +128,11 @@ class MealItemEstimate:
             identification_confidence=optional_confidence("identification_confidence"),
             portion_confidence=optional_confidence("portion_confidence"),
             evidence=evidence,
+            assumption_categories={
+                key: str(value)
+                for key, value in assumption_payload.items()
+                if key in ASSUMPTION_KEYS and value not in (None, "")
+            },
         )
 
     def scaled(self, factor: float) -> "MealItemEstimate":
@@ -137,6 +149,7 @@ class MealItemEstimate:
             identification_confidence=self.identification_confidence,
             portion_confidence=self.portion_confidence,
             evidence=self.evidence,
+            assumption_categories=dict(self.assumption_categories),
         )
 
 
@@ -162,6 +175,7 @@ class MealEstimate:
     item_derived_total: Optional[MacroTotal] = None
     reconciliation_status: str = "not_evaluated"
     follow_up_question: Optional[str] = None
+    estimator_version: str = ESTIMATOR_VERSION
 
     @property
     def total_best(self) -> MacroTotal:
@@ -242,6 +256,7 @@ class MealEstimate:
             item_derived_total=(MacroTotal.from_payload(item_derived_payload) if isinstance(item_derived_payload, dict) else None),
             reconciliation_status=str(payload.get("reconciliation_status", "not_evaluated") or "not_evaluated"),
             follow_up_question=str(payload.get("follow_up_question", "") or "") or None,
+            estimator_version=str(payload.get("estimator_version", ESTIMATOR_VERSION) or ESTIMATOR_VERSION),
         )
 
     def scaled(self, factor: float) -> "MealEstimate":
@@ -266,7 +281,96 @@ class MealEstimate:
             item_derived_total=self.item_derived_total.scaled(factor) if self.item_derived_total else None,
             reconciliation_status=self.reconciliation_status,
             follow_up_question=self.follow_up_question,
+            estimator_version=self.estimator_version,
         )
+
+    def to_payload(self) -> Dict[str, object]:
+        return {
+            "meal_name": self.meal_name,
+            "calories": round(self.calories, 1),
+            "protein_g": round(self.protein_g, 1),
+            "carbs_g": round(self.carbs_g, 1),
+            "fat_g": round(self.fat_g, 1),
+            "confidence": round(self.confidence, 3),
+            "notes": self.notes,
+            "identification_confidence": self.identification_confidence,
+            "portion_confidence": self.portion_confidence,
+            "macro_confidence": self.macro_confidence,
+            "items": [
+                {
+                    "name": item.name,
+                    "portion_g": round(item.portion_g, 1),
+                    "assumptions": item.assumptions,
+                    "assumption_categories": dict(item.assumption_categories),
+                    "calories": round(item.calories, 1),
+                    "protein_g": round(item.protein_g, 1),
+                    "carbs_g": round(item.carbs_g, 1),
+                    "fat_g": round(item.fat_g, 1),
+                    "portion_low_g": item.portion_low_g,
+                    "portion_high_g": item.portion_high_g,
+                    "identification_confidence": item.identification_confidence,
+                    "portion_confidence": item.portion_confidence,
+                    "evidence": item.evidence,
+                }
+                for item in self.items
+            ],
+            "total_best": self.total_best.to_payload(),
+            "total_low": self.total_low.to_payload() if self.total_low else None,
+            "total_high": self.total_high.to_payload() if self.total_high else None,
+            "variance_drivers": list(self.variance_drivers),
+            "item_breakdown_complete": self.item_breakdown_complete,
+            "model_reported_total": self.model_reported_total.to_payload() if self.model_reported_total else None,
+            "item_derived_total": self.item_derived_total.to_payload() if self.item_derived_total else None,
+            "reconciliation_status": self.reconciliation_status,
+            "metrics_event_id": self.metrics_event_id,
+            "estimator_version": self.estimator_version,
+            "follow_up_question": self.follow_up_question,
+        }
+
+    def adjust_category(self, category: str, value: str) -> "MealEstimate":
+        """Apply a documented, deterministic correction to matching items."""
+
+        category = str(category).strip().lower()
+        value = str(value).strip().lower()
+        if category == "portion":
+            return self.scaled({"smaller": 0.8, "larger": 1.2}.get(value, 1.0))
+
+        terms = {
+            "base": ("rice", "noodle", "pasta", "bread", "roti", "chapati", "potato", "grain"),
+            "protein": ("chicken", "fish", "salmon", "meat", "egg", "paneer", "tofu", "dal", "lentil"),
+            "sauce": ("sauce", "gravy", "dressing", "oil", "mayo", "cheese", "curry"),
+            "skin": ("chicken", "duck", "skin"),
+        }
+        matching = [item for item in self.items if any(term in item.name.lower() for term in terms.get(category, ()))]
+        if not matching:
+            return self
+
+        def transform(item: MealItemEstimate) -> MealItemEstimate:
+            if category == "skin" and value == "removed":
+                new_fat = item.fat_g * 0.75
+                new_calories = max(0.0, item.calories - (item.fat_g - new_fat) * 9.0)
+                return replace(item, fat_g=new_fat, calories=new_calories, assumptions=f"{item.assumptions}; skin removed")
+            factor = {"half": 0.5, "less": 0.7, "light": 0.5, "moderate": 1.0, "heavy": 1.5, "more": 1.3}.get(value, 1.0)
+            return item.scaled(factor)
+
+        updated = [transform(item) if item in matching else item for item in self.items]
+        total = MacroTotal(
+            calories=sum(item.calories for item in updated),
+            protein_g=sum(item.protein_g for item in updated),
+            carbs_g=sum(item.carbs_g for item in updated),
+            fat_g=sum(item.fat_g for item in updated),
+        )
+        low = self.total_low or self.total_best
+        high = self.total_high or self.total_best
+        adjusted_low = MacroTotal(
+            calories=min(low.calories, total.calories), protein_g=min(low.protein_g, total.protein_g),
+            carbs_g=min(low.carbs_g, total.carbs_g), fat_g=min(low.fat_g, total.fat_g),
+        )
+        adjusted_high = MacroTotal(
+            calories=max(high.calories, total.calories), protein_g=max(high.protein_g, total.protein_g),
+            carbs_g=max(high.carbs_g, total.carbs_g), fat_g=max(high.fat_g, total.fat_g),
+        )
+        return replace(self, calories=total.calories, protein_g=total.protein_g, carbs_g=total.carbs_g, fat_g=total.fat_g, items=updated, total_low=adjusted_low, total_high=adjusted_high)
 
     def assumptions_summary(self, max_chars: int = 120) -> str:
         fragments: List[str] = []
@@ -285,6 +389,27 @@ class MealEstimate:
         if len(text) <= max_chars:
             return text
         return f"{text[: max_chars - 3].rstrip()}..."
+
+    def assumptions_detail(self, max_lines: int = 3) -> List[str]:
+        labels = {
+            "food_identity": "food identity",
+            "portion": "portion",
+            "cooking_method": "cooking method",
+            "oil_fat": "oil/fat",
+            "sauce_dressing": "sauce/dressing",
+            "hidden_ingredients": "hidden ingredients",
+        }
+        lines: List[str] = []
+        for item in self.items:
+            for key, value in item.assumption_categories.items():
+                value = str(value).strip()
+                if value:
+                    lines.append(f"{labels.get(key, key)}: {value}")
+                    if len(lines) >= max_lines:
+                        return lines
+        if not lines:
+            return [self.assumptions_summary()]
+        return lines
 
 
 @dataclass
@@ -306,6 +431,7 @@ class PendingMealAction:
     canonical_sk: Optional[str] = None
     expires_at: int = 0
     original_estimate: Optional[MealEstimate] = None
+    correction_state: str = ""
 
     def scale(self, factor: float) -> None:
         if self.status != "pending":
@@ -672,6 +798,7 @@ class RecommendedMeal:
     fat_g: float
     fit_rationale: str
     tradeoffs: str
+    candidate_id: str = ""
 
     @classmethod
     def from_payload(cls, payload: Dict[str, object]) -> "RecommendedMeal":
@@ -698,6 +825,7 @@ class RecommendedMeal:
             fat_g=float(payload["fat_g"]),
             fit_rationale=str(payload["fit_rationale"]),
             tradeoffs=str(payload["tradeoffs"]),
+            candidate_id=str(payload.get("candidate_id", "") or ""),
         )
 
     @classmethod
@@ -711,6 +839,7 @@ class RecommendedMeal:
             fat_g=candidate.fat_g,
             fit_rationale=fit_rationale,
             tradeoffs=tradeoffs,
+            candidate_id=candidate.food_id,
         )
 
     def to_payload(self) -> Dict[str, object]:
@@ -723,6 +852,7 @@ class RecommendedMeal:
             "fat_g": round(self.fat_g, 1),
             "fit_rationale": self.fit_rationale,
             "tradeoffs": self.tradeoffs,
+            "candidate_id": self.candidate_id,
         }
 
 
@@ -733,6 +863,7 @@ class RecommendationResult:
     remaining_macros: MacroTotal
     suggestions: List[RecommendedMeal]
     source: str
+    strategy_version: str = "nutrition-recommendation-v2"
 
     @classmethod
     def from_payload(cls, payload: Dict[str, object]) -> "RecommendationResult":
@@ -751,6 +882,7 @@ class RecommendationResult:
             remaining_macros=MacroTotal.from_payload(payload["remaining_macros"]),
             suggestions=[RecommendedMeal.from_payload(item) for item in suggestions_payload],
             source=str(payload["source"]),
+            strategy_version=str(payload.get("strategy_version", "nutrition-recommendation-v2") or "nutrition-recommendation-v2"),
         )
 
     def to_payload(self) -> Dict[str, object]:
@@ -760,6 +892,7 @@ class RecommendationResult:
             "remaining_macros": self.remaining_macros.to_payload(),
             "suggestions": [item.to_payload() for item in self.suggestions],
             "source": self.source,
+            "strategy_version": self.strategy_version,
         }
 
 
@@ -771,6 +904,8 @@ class RecommendationRequest:
     remaining: RemainingMacros
     recent_meals: List[str]
     candidate_foods: List[CandidateFood]
+    today_meals: List[Dict[str, object]] = field(default_factory=list)
+    local_time: str = ""
 
     def to_payload(self) -> Dict[str, object]:
         return {
@@ -780,6 +915,8 @@ class RecommendationRequest:
             "remaining_macros": self.remaining.to_payload(),
             "recent_meals": list(self.recent_meals),
             "candidate_foods": [item.to_payload() for item in self.candidate_foods],
+            "today_meals": list(self.today_meals),
+            "local_time": self.local_time,
         }
 
 

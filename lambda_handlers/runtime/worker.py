@@ -18,6 +18,7 @@ from macro_bot.direct_estimator import DirectEstimationError, DirectOpenAIEstima
 from macro_bot.formatting import (
     build_direct_setup_keyboard,
     build_meal_keyboard,
+    build_adjustment_keyboard,
     build_setup_keyboard,
     build_mini_app_direct_link,
     format_pending_message,
@@ -563,11 +564,24 @@ async def _handle_workout(
 
 async def _handle_recommendation(service: NutritionService, identity: Any, bot: Any, chat_id: int) -> None:
     try:
-        result, _prepared = service.recommendation(identity)
+        if hasattr(service, "recommendation_async"):
+            result, _prepared = await service.recommendation_async(identity)
+        else:
+            result, _prepared = service.recommendation(identity)
     except KeyError:
         url = os.getenv("MINI_APP_URL", "").strip()
         await _send(bot, chat_id, format_profile_setup_message(url), build_setup_keyboard(url))
         return
+    except Exception as err:
+        logger.warning("nutrition_recommendation_failed user_fingerprint=%s error_category=%s", _fingerprint(identity.user_id), type(err).__name__)
+        return
+    logger.info(
+        "nutrition_recommendation_completed user_fingerprint=%s source=%s strategy_version=%s suggestions=%s",
+        _fingerprint(identity.user_id),
+        result.source,
+        getattr(result, "strategy_version", "nutrition-recommendation-v2"),
+        len(result.suggestions),
+    )
     await _send(bot, chat_id, format_recommendation_message(result))
 
 
@@ -769,11 +783,16 @@ async def _handle_callback(
         stage="callback",
     )
     if len(parts) != 4 or parts[:2] != ["meal", "v1"]:
-        if callback_id:
-            await bot.answer_callback_query(callback_query_id=callback_id)
-        return
+        if len(parts) != 6 or parts[:3] != ["meal", "v1", "fix"]:
+            if callback_id:
+                await bot.answer_callback_query(callback_query_id=callback_id)
+            return
     action_name, token = parts[2], parts[3]
-    if action_name not in {"smaller", "larger", "confirm", "cancel"} or not token:
+    if len(parts) == 6:
+        action_name, category, value, token = parts[2], parts[3], parts[4], parts[5]
+    else:
+        category = value = ""
+    if (len(parts) == 4 and action_name not in {"smaller", "larger", "confirm", "cancel", "adjust", "back"}) or not token:
         if callback_id:
             await bot.answer_callback_query(callback_query_id=callback_id)
         return
@@ -784,9 +803,57 @@ async def _handle_callback(
             await bot.answer_callback_query(callback_query_id=callback_id, text="Not your meal or meal expired.")
         return
     try:
+        if action_name == "adjust":
+            action = service.set_correction_state(identity, token, "menu")
+            if callback_id:
+                await bot.answer_callback_query(callback_query_id=callback_id)
+            message = callback.get("message")
+            if isinstance(message, Mapping):
+                chat_id = _chat_id(message)
+                message_id = _message_id(message)
+                if chat_id is not None and message_id:
+                    await bot.edit_message_text(
+                        chat_id=chat_id,
+                        message_id=message_id,
+                        text=f"{format_pending_message(action)}\n\n✏️ Choose the correction that matters most:",
+                        reply_markup=build_adjustment_keyboard(action),
+                    )
+            return
+        if action_name == "back":
+            action = service.set_correction_state(identity, token, "")
+            if callback_id:
+                await bot.answer_callback_query(callback_query_id=callback_id)
+            message = callback.get("message")
+            if isinstance(message, Mapping):
+                chat_id = _chat_id(message)
+                message_id = _message_id(message)
+                if chat_id is not None and message_id:
+                    await bot.edit_message_text(chat_id=chat_id, message_id=message_id, text=format_pending_message(action), reply_markup=build_meal_keyboard(token))
+            return
+        if len(parts) == 6:
+            if action.correction_state != "menu":
+                raise ActionFinalized("Correction menu expired")
+            action = service.apply_correction(identity, token, category, value)
+            logger.info(
+                "nutrition_correction_applied user_fingerprint=%s correction_type=%s correction_value=%s",
+                _fingerprint(identity.user_id), category, value,
+            )
+            if callback_id:
+                await bot.answer_callback_query(callback_query_id=callback_id, text="Estimate adjusted")
+            message = callback.get("message")
+            if isinstance(message, Mapping):
+                chat_id = _chat_id(message)
+                message_id = _message_id(message)
+                if chat_id is not None and message_id:
+                    await bot.edit_message_text(chat_id=chat_id, message_id=message_id, text=format_pending_message(action), reply_markup=build_meal_keyboard(token))
+            return
         if action_name in {"smaller", "larger"}:
             try:
-                action = service.scale_action(identity, token, 0.8 if action_name == "smaller" else 1.2)
+                action = service.apply_correction(identity, token, "portion", "smaller" if action_name == "smaller" else "larger")
+                logger.info(
+                    "nutrition_correction_applied user_fingerprint=%s correction_type=portion correction_value=%s",
+                    _fingerprint(identity.user_id), action_name,
+                )
             except ActionExpired:
                 result = service.auto_confirm_expired_action(identity, token)
                 auto_confirmed = True
@@ -835,7 +902,10 @@ async def _handle_callback(
             else:
                 text = f"{format_pending_message(result.action)}\n\n❌ Cancelled — please re-upload the photo (add caption if possible)."
             await bot.edit_message_text(chat_id=chat_id, message_id=message_id, text=text, reply_markup=None)
-            if result.status == "confirmed" and not result.duplicate:
+            if result.status == "confirmed" and not result.duplicate and (
+                not hasattr(service, "should_recommend_after_meal")
+                or service.should_recommend_after_meal(identity, getattr(result.meal, "eaten_at", None))
+            ):
                 await _handle_recommendation(service, identity, bot, chat_id)
 
 

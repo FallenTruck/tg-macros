@@ -1,4 +1,4 @@
-.PHONY: sync-runtime deploy-miniapp e2e-install e2e-provision e2e-reset e2e-smoke e2e-screenshots
+.PHONY: sync-runtime nutrition-eval deploy-miniapp e2e-install e2e-provision e2e-reset e2e-smoke e2e-screenshots
 
 RUNTIME_DIR = lambda_handlers/runtime
 AWS_PROFILE ?= fitness-dev
@@ -13,6 +13,9 @@ sync-runtime:
 	cp lambda_handlers/webhook.py lambda_handlers/webhook_runtime/webhook.py
 	cp macro_bot/__init__.py macro_bot/direct_estimator.py macro_bot/formatting.py macro_bot/models.py macro_bot/profile_targets.py macro_bot/recommendations.py macro_bot/serverless_auth.py macro_bot/serverless_data.py macro_bot/serverless_service.py macro_bot/workout_execution.py macro_bot/workout_programme.py "$(RUNTIME_DIR)/macro_bot/"
 	cp food_catalog.json "$(RUNTIME_DIR)/food_catalog.json"
+
+nutrition-eval:
+	$(E2E_PYTHON) scripts/nutrition_eval.py
 
 deploy-miniapp:
 	AWS_PROFILE="$(AWS_PROFILE)" AWS_REGION="$(AWS_REGION)" AWS_DEFAULT_REGION="$(AWS_REGION)" STACK_NAME="$(STACK_NAME)" bash scripts/deploy_miniapp.sh
