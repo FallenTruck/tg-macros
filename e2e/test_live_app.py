@@ -390,9 +390,19 @@ class LiveJavaanFitnessE2ETests(unittest.TestCase):
             }""", timeout=210_000)
             confirmed = result()
             self.assertEqual(confirmed["action"]["status"], "confirmed")
+            state_preview = confirmed["nutrition_state_telegram_preview"]
+            self.assertTrue(state_preview.startswith("✅ Meal logged"))
+            self.assertIn("This meal", state_preview)
+            self.assertIn("Remaining", state_preview)
+            self.assertNotIn("What to eat next", state_preview)
             if confirmed["recommendation_status"] == "complete":
-                self.assertIn("strategy_version", confirmed["recommendation"])
-                self.assertTrue(confirmed["recommendation_telegram_preview"])
+                self.assertEqual(confirmed["recommendation"]["strategy_version"], "nutrition-recommendation-v3")
+                if confirmed["recommendation"]["source"] == "skipped":
+                    self.assertEqual(confirmed["recommendation_telegram_preview"], "")
+                else:
+                    self.assertTrue(confirmed["recommendation"]["suggestions"])
+                    self.assertTrue(confirmed["recommendation_telegram_preview"].startswith("🥗 What to eat next"))
+                    self.assertNotIn("This meal", confirmed["recommendation_telegram_preview"])
             else:
                 self.assertTrue(confirmed["recommendation"].get("error") or confirmed["recommendation"].get("reason"))
             day = context.request.get(self.base_url + "/api/nutrition/day").json()

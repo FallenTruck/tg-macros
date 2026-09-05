@@ -180,7 +180,20 @@ class _FakeWorkerService:
 
     def auto_confirm_expired_action(self, identity, token):
         self.action.status = "confirmed"
-        return FinalizeResult("confirmed", self.action, None, duplicate=False)
+        return FinalizeResult("confirmed", self.action, SimpleNamespace(eaten_at="2026-01-15T04:00:00Z"), duplicate=False)
+
+    def nutrition_message_sent(self, identity, token):
+        return False
+
+    def mark_nutrition_message_sent(self, identity, token, message_id):
+        pass
+
+    def confirmed_nutrition_payload(self, identity, meal_id):
+        return {"date": "2026-01-15", "today": "2026-01-15", "this_meal": _estimate().total_best.to_payload(),
+                "consumed": _estimate().total_best.to_payload(), "target": None, "remaining": None}
+
+    def should_recommend_after_meal(self, identity, eaten_at):
+        return True
 
     def recommendation(self, identity):
         raise KeyError("profile missing")

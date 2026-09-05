@@ -102,10 +102,10 @@ class FormattingAndModelTests(unittest.TestCase):
         )
 
         message = format_recommendation_message(result)
-        self.assertIn("Next meal suggestions", message)
+        self.assertIn("🥗 What to eat next", message)
         self.assertIn("Grilled Chicken Wrap", message)
-        self.assertIn("Why:", message)
-        self.assertIn("Watch:", message)
+        self.assertIn("strong protein fit", message)
+        self.assertIn("fat may run a bit high", message)
 
     def test_recommendation_skip_formatting(self):
         result = RecommendationResult(
@@ -117,8 +117,7 @@ class FormattingAndModelTests(unittest.TestCase):
         )
 
         message = format_recommendation_message(result)
-        self.assertIn("Recommendation check", message)
-        self.assertIn("less than 200 kcal", message)
+        self.assertEqual(message, "")
 
 
 if __name__ == "__main__":

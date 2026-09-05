@@ -606,6 +606,14 @@ class FoodCatalogEntry:
     tags: List[str] = field(default_factory=list)
     cuisines: List[str] = field(default_factory=list)
     eligible_telegram_user_ids: List[int] = field(default_factory=list)
+    meal_type: str = "full_meal"
+    contains: List[str] = field(default_factory=list)
+    available: bool = True
+    nutrition_source: str = "Legacy curated serving estimate; recipe-dependent."
+
+    def __post_init__(self):
+        if self.meal_type not in {"full_meal", "light_meal", "snack", "protein_top_up"}:
+            raise ValueError("Unknown catalogue meal type")
 
     @classmethod
     def from_payload(cls, payload: Dict[str, object]) -> "FoodCatalogEntry":
@@ -625,6 +633,10 @@ class FoodCatalogEntry:
             tags=[str(x) for x in payload.get("tags", [])],
             cuisines=[str(x) for x in payload.get("cuisines", [])],
             eligible_telegram_user_ids=[int(x) for x in eligible_ids_payload or []],
+            meal_type=str(payload.get("meal_type", "full_meal")),
+            contains=[str(x) for x in payload.get("contains", [])],
+            available=payload.get("available", True) is True,
+            nutrition_source=str(payload.get("nutrition_source", "Legacy curated serving estimate; recipe-dependent.")),
         )
 
     def to_payload(self) -> Dict[str, object]:
@@ -636,6 +648,10 @@ class FoodCatalogEntry:
             "tags": list(self.tags),
             "cuisines": list(self.cuisines),
             "eligible_telegram_user_ids": list(self.eligible_telegram_user_ids),
+            "meal_type": self.meal_type,
+            "contains": list(self.contains),
+            "available": self.available,
+            "nutrition_source": self.nutrition_source,
         }
 
 
@@ -652,6 +668,7 @@ class CandidateFood:
     cuisines: List[str] = field(default_factory=list)
     fit_score: float = 0.0
     fit_reason: str = ""
+    meal_type: str = "full_meal"
 
     @classmethod
     def from_catalog(
@@ -672,6 +689,7 @@ class CandidateFood:
             cuisines=list(entry.cuisines),
             fit_score=fit_score,
             fit_reason=fit_reason,
+            meal_type=entry.meal_type,
         )
 
     @classmethod
@@ -700,6 +718,7 @@ class CandidateFood:
             cuisines=[str(x) for x in payload.get("cuisines", [])],
             fit_score=float(payload.get("fit_score", 0.0) or 0.0),
             fit_reason=str(payload.get("fit_reason", "")),
+            meal_type=str(payload.get("meal_type", "full_meal")),
         )
 
     @property
@@ -724,6 +743,7 @@ class CandidateFood:
             "cuisines": list(self.cuisines),
             "fit_score": round(self.fit_score, 3),
             "fit_reason": self.fit_reason,
+            "meal_type": self.meal_type,
         }
 
 
@@ -863,7 +883,7 @@ class RecommendationResult:
     remaining_macros: MacroTotal
     suggestions: List[RecommendedMeal]
     source: str
-    strategy_version: str = "nutrition-recommendation-v2"
+    strategy_version: str = "nutrition-recommendation-v3"
 
     @classmethod
     def from_payload(cls, payload: Dict[str, object]) -> "RecommendationResult":
@@ -906,6 +926,8 @@ class RecommendationRequest:
     candidate_foods: List[CandidateFood]
     today_meals: List[Dict[str, object]] = field(default_factory=list)
     local_time: str = ""
+    timing: Dict[str, object] = field(default_factory=dict)
+    strategy_signal: str = ""
 
     def to_payload(self) -> Dict[str, object]:
         return {
@@ -917,6 +939,8 @@ class RecommendationRequest:
             "candidate_foods": [item.to_payload() for item in self.candidate_foods],
             "today_meals": list(self.today_meals),
             "local_time": self.local_time,
+            "timing": dict(self.timing),
+            "strategy_signal": self.strategy_signal,
         }
 
 

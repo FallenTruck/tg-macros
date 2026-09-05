@@ -105,6 +105,30 @@ class NutritionLab:
     def _job_item(self, key):
         return self.jobs.get_item(Key=key, ConsistentRead=True).get("Item")
 
+    async def recommendation_scenarios(self):
+        """Read-only deployed smoke using fixed clocks and the validated E2E profile."""
+        from dataclasses import asdict
+        from .serverless_service import NutritionService
+        from .formatting import format_recommendation_message
+        require_identity(self.repo, self.identity)
+        profile = self.repo.get_profile(self.identity.user_id)
+        if profile is None:
+            raise LabUnavailable("Reset the synthetic baseline before running scenarios.")
+        local_now = self.service._now().astimezone(ZoneInfo(profile.timezone))
+        results = []
+        for name, hour in (("early_evening", 18), ("late_evening", 22)):
+            scenario_now = local_now.replace(hour=hour, minute=30, second=0, microsecond=0)
+            scenario_service = NutritionService(self.repo, catalog_store=self.service.catalog_store,
+                                                 now_fn=lambda: scenario_now)
+            scenario_service._planner._recommendation_client = self.service._planner._recommendation_client
+            result, prepared = await scenario_service.recommendation_async(self.identity)
+            results.append({"scenario": name, "timing": asdict(prepared.timing),
+                            "strategy_version": result.strategy_version, "source": result.source,
+                            "candidates": [item.to_payload() for item in prepared.candidate_foods],
+                            "suggestions": [item.candidate_id for item in result.suggestions],
+                            "preview": format_recommendation_message(result)})
+        return {"scenarios": results}
+
     def _profile_revision(self):
         profile = self.repo._get({"PK": USER_PK, "SK": "PROFILE"}) or {}
         return profile.get("e2e_reset_revision") or profile.get("updated_at")
@@ -224,7 +248,10 @@ class NutritionLab:
                           follow_up_question=current_estimate.follow_up_question,
                           telegram_preview=format_macro_message(current_estimate))
         if action and action.status == "confirmed":
+            from .formatting import format_nutrition_state_message
+            state = self.service.confirmed_nutrition_payload(self.identity, action.meal_id)
             result["daily_state"] = self.service.daily_nutrition_payload(self.identity)
+            result["nutrition_state_telegram_preview"] = format_nutrition_state_message(state)
         recommendation = item.get("recommendation")
         if recommendation:
             result["recommendation_telegram_preview"] = (recommendation.get("error") or recommendation.get("reason") or
@@ -350,10 +377,15 @@ class NutritionLab:
                 return
             raise
         try:
-            result, _prepared = await self.service.recommendation_async(self.identity)
             from .formatting import format_recommendation_message
-            payload, status = result.to_payload(), "complete"
-            preview = format_recommendation_message(result)
+            meal = self.repo.get_meal(self.identity, action.meal_id)
+            if not self.service.should_recommend_after_meal(self.identity, meal.eaten_at):
+                payload, status = {"reason": "Past-date meal: current-day recommendation suppressed."}, "skipped"
+                preview = ""
+            else:
+                result, _prepared = await self.service.recommendation_async(self.identity)
+                payload, status = result.to_payload(), "complete"
+                preview = format_recommendation_message(result)
         except Exception:
             payload, status = {"error": "Recommendation unavailable; the meal remains confirmed."}, "failed"
             preview = payload["error"]

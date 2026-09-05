@@ -350,3 +350,28 @@ identity matching, range coverage/width, caption effects and repeatability.
 Tier B counts and Tier C identities never become macro truth. Private reports
 remain ignored. See the [baseline record](../evals/nutrition/ACCURACY_BASELINE.md)
 for results, unavailable dimensions, and constraints on the next calibration goal.
+
+### Phase 2.3 recommendation scenarios
+
+After a backend deployment, run `make e2e-recommendations`. The script validates
+only the marked `javaan-e2e` identity/credential, resets that exact baseline,
+and invokes the deployed `NutritionLabFunction` with the fixed internal
+`recommendation_scenarios` operation. This is an IAM-only dev smoke entry point,
+not an HTTP endpoint: it accepts no clock, user ID, macros, or Telegram destination.
+The Lambda rechecks all existing Lab gates and identity records.
+
+It reads the persisted synthetic profile/confirmed meals and uses 18:30 and 22:30
+in that profile's timezone to exercise two real recommendation calls. Assertions
+check that a full meal ranks normally early, a light/protein option leads late,
+all suggestions use supplied IDs, and the entire synthetic user partition is
+unchanged during scenarios. The script restores the baseline in cleanup and
+writes `artifacts/e2e/recommendation-scenarios.json`. No real user is queried,
+modified or messaged; no photo estimation/accuracy benchmark runs are required.
+Run this sequentially with all other E2E resets and logging tests.
+
+`make recommendation-benchmark` is the offline counterpart, including all ten
+requested nutrition scenarios, timezone/boundary tests, catalogue restriction
+filtering, candidate-ID validation, Telegram formatting, delivery ordering,
+historical suppression, duplicate callbacks and failure isolation. The Lab's
+confirmed JSON now includes `nutrition_state_telegram_preview` separately from
+`recommendation_telegram_preview`; existing estimate previews remain unchanged.

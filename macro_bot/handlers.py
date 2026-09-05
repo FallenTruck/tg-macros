@@ -367,8 +367,11 @@ class BotHandlers:
                 str(metrics_err)[:120],
             )
 
+        message = format_recommendation_message(result)
+        if not message:
+            return
         await self._deliver_message(
-            format_recommendation_message(result),
+            message,
             context=context,
             reply_message=reply_message,
             chat_id=chat_id,

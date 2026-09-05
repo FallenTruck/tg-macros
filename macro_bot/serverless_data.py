@@ -1415,6 +1415,7 @@ class DynamoNutritionRepository:
         items = self._query(
             Key("PK").eq(identity.pk) & Key("SK").between(f"MEAL#{start_iso}", f"MEAL#{end_iso}"),
             ScanIndexForward=True,
+            ConsistentRead=True,
         )
         meals = [_meal_from_item(item) for item in items]
         if confirmed_only:

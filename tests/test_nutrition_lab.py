@@ -100,6 +100,24 @@ class LabTests(unittest.TestCase):
         self.assertTrue(self.responses.calls[0]["text"]["format"]["strict"])
         self.s3.delete_object.assert_called_once()
 
+    def test_recommendation_scenarios_use_synthetic_partition_without_writes(self):
+        self.service._planner._recommendation_client = None
+        before = copy.deepcopy(self.table.items)
+        result = asyncio.run(self.lab.recommendation_scenarios())
+        self.assertEqual(self.table.items, before)
+        self.assertEqual(len(result["scenarios"]), 2)
+        for scenario in result["scenarios"]:
+            self.assertEqual(scenario["source"], "deterministic_fallback")
+            self.assertTrue(scenario["suggestions"])
+        self.assertEqual(result["scenarios"][0]["candidates"][0]["meal_type"], "full_meal")
+        self.assertIn(result["scenarios"][1]["candidates"][0]["meal_type"], {"light_meal", "protein_top_up", "snack"})
+
+    def test_recommendation_scenarios_recheck_identity_guard(self):
+        from macro_bot.nutrition_lab import LabUnavailable
+        with patch.dict(os.environ, {"E2E_NUTRITION_LAB_ENABLED": "false"}):
+            with self.assertRaises(LabUnavailable):
+                asyncio.run(self.lab.recommendation_scenarios())
+
     def test_production_preview_and_application_version(self):
         from macro_bot.formatting import format_macro_message
         from macro_bot.models import MealEstimate, ESTIMATOR_VERSION

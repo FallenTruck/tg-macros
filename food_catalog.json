@@ -4,145 +4,265 @@
       "food_id": "chicken_rice_bowl",
       "name": "Chicken Rice Bowl",
       "serving": "1 bowl with lean chicken and rice",
-      "macros": { "calories": 560, "protein_g": 42, "carbs_g": 58, "fat_g": 16 },
-      "tags": ["meal", "high_protein", "asian", "home"],
+      "macros": {"calories": 560, "protein_g": 42, "carbs_g": 58, "fat_g": 16},
+      "tags": ["asian", "high_protein", "home", "meal"],
       "cuisines": ["asian"],
-      "eligible_telegram_user_ids": [349553317]
+      "meal_type": "full_meal",
+      "contains": ["poultry"],
+      "available": true,
+      "nutrition_source": "Legacy curated serving estimate; not a verified restaurant or package label. See docs/RECOMMENDATIONS.md."
     },
     {
       "food_id": "grilled_chicken_wrap",
       "name": "Grilled Chicken Wrap",
       "serving": "1 wrap with vegetables",
-      "macros": { "calories": 480, "protein_g": 38, "carbs_g": 36, "fat_g": 18 },
-      "tags": ["meal", "high_protein", "western", "home"],
+      "macros": {"calories": 480, "protein_g": 38, "carbs_g": 36, "fat_g": 18},
+      "tags": ["high_protein", "home", "meal", "western"],
       "cuisines": ["western"],
-      "eligible_telegram_user_ids": [349553317]
+      "meal_type": "full_meal",
+      "contains": ["poultry", "gluten"],
+      "available": true,
+      "nutrition_source": "Legacy curated serving estimate; not a verified restaurant or package label. See docs/RECOMMENDATIONS.md."
     },
     {
       "food_id": "double_protein_shake",
       "name": "Double Protein Shake",
       "serving": "2 scoops whey with milk",
-      "macros": { "calories": 380, "protein_g": 48, "carbs_g": 18, "fat_g": 6 },
-      "tags": ["snack", "high_protein", "quick"],
+      "macros": {"calories": 380, "protein_g": 48, "carbs_g": 18, "fat_g": 6},
+      "tags": ["high_protein", "low_fat", "quick", "snack", "vegetarian"],
       "cuisines": [],
-      "eligible_telegram_user_ids": [349553317]
+      "meal_type": "protein_top_up",
+      "contains": ["dairy"],
+      "available": true,
+      "nutrition_source": "Legacy curated serving estimate; not a verified restaurant or package label. See docs/RECOMMENDATIONS.md."
     },
     {
       "food_id": "egg_toast_plate",
       "name": "Egg and Toast Plate",
       "serving": "3 eggs with 2 slices toast",
-      "macros": { "calories": 420, "protein_g": 26, "carbs_g": 28, "fat_g": 22 },
-      "tags": ["meal", "protein", "quick", "home"],
+      "macros": {"calories": 420, "protein_g": 26, "carbs_g": 28, "fat_g": 22},
+      "tags": ["high_fat", "home", "meal", "protein", "quick"],
       "cuisines": ["western"],
-      "eligible_telegram_user_ids": [349553317]
+      "meal_type": "light_meal",
+      "contains": ["egg", "gluten"],
+      "available": true,
+      "nutrition_source": "Legacy curated serving estimate; not a verified restaurant or package label. See docs/RECOMMENDATIONS.md."
     },
     {
       "food_id": "salmon_rice_plate",
       "name": "Salmon Rice Plate",
       "serving": "1 plate salmon with rice and vegetables",
-      "macros": { "calories": 620, "protein_g": 40, "carbs_g": 52, "fat_g": 26 },
-      "tags": ["meal", "high_protein", "asian"],
+      "macros": {"calories": 620, "protein_g": 40, "carbs_g": 52, "fat_g": 26},
+      "tags": ["asian", "heavy", "high_fat", "high_protein", "meal"],
       "cuisines": ["asian"],
-      "eligible_telegram_user_ids": [349553317]
+      "meal_type": "full_meal",
+      "contains": ["fish"],
+      "available": true,
+      "nutrition_source": "Legacy curated serving estimate; not a verified restaurant or package label. See docs/RECOMMENDATIONS.md."
     },
     {
       "food_id": "greek_yogurt_bowl",
       "name": "Greek Yogurt Fruit Bowl",
       "serving": "1 bowl yogurt with fruit and nuts",
-      "macros": { "calories": 320, "protein_g": 22, "carbs_g": 28, "fat_g": 10 },
-      "tags": ["snack", "vegetarian", "protein", "quick"],
+      "macros": {"calories": 320, "protein_g": 22, "carbs_g": 28, "fat_g": 10},
+      "tags": ["late_evening_friendly", "protein", "quick", "snack", "vegetarian"],
       "cuisines": [],
-      "eligible_telegram_user_ids": [559404539, 349553317]
+      "meal_type": "snack",
+      "contains": ["dairy", "nuts"],
+      "available": true,
+      "nutrition_source": "Legacy curated serving estimate; not a verified restaurant or package label. See docs/RECOMMENDATIONS.md."
     },
     {
       "food_id": "tofu_veg_rice",
       "name": "Tofu Veg Rice Bowl",
       "serving": "1 bowl tofu, rice, mixed vegetables",
-      "macros": { "calories": 510, "protein_g": 24, "carbs_g": 58, "fat_g": 18 },
-      "tags": ["meal", "vegetarian", "asian"],
+      "macros": {"calories": 510, "protein_g": 24, "carbs_g": 58, "fat_g": 18},
+      "tags": ["asian", "meal", "vegan", "vegetarian"],
       "cuisines": ["asian"],
-      "eligible_telegram_user_ids": [559404539]
+      "meal_type": "full_meal",
+      "contains": ["soy"],
+      "available": true,
+      "nutrition_source": "Legacy curated serving estimate; not a verified restaurant or package label. See docs/RECOMMENDATIONS.md."
     },
     {
       "food_id": "paneer_wrap",
       "name": "Paneer Wrap",
       "serving": "1 wrap with paneer and vegetables",
-      "macros": { "calories": 470, "protein_g": 24, "carbs_g": 38, "fat_g": 22 },
-      "tags": ["meal", "vegetarian", "indian"],
+      "macros": {"calories": 470, "protein_g": 24, "carbs_g": 38, "fat_g": 22},
+      "tags": ["high_fat", "indian", "meal", "vegetarian"],
       "cuisines": ["indian"],
-      "eligible_telegram_user_ids": [559404539]
+      "meal_type": "full_meal",
+      "contains": ["dairy", "gluten"],
+      "available": true,
+      "nutrition_source": "Legacy curated serving estimate; not a verified restaurant or package label. See docs/RECOMMENDATIONS.md."
     },
     {
       "food_id": "dal_rice_bowl",
       "name": "Dal Rice Bowl",
       "serving": "1 bowl dal with steamed rice",
-      "macros": { "calories": 430, "protein_g": 16, "carbs_g": 68, "fat_g": 8 },
-      "tags": ["meal", "vegetarian", "indian", "comfort"],
+      "macros": {"calories": 430, "protein_g": 16, "carbs_g": 68, "fat_g": 8},
+      "tags": ["comfort", "indian", "low_fat", "meal", "vegan", "vegetarian"],
       "cuisines": ["indian"],
-      "eligible_telegram_user_ids": [559404539]
+      "meal_type": "full_meal",
+      "contains": [],
+      "available": true,
+      "nutrition_source": "Legacy curated serving estimate; not a verified restaurant or package label. See docs/RECOMMENDATIONS.md."
     },
     {
       "food_id": "chapati_paneer_combo",
       "name": "Chapati and Paneer Combo",
       "serving": "2 chapati with paneer curry",
-      "macros": { "calories": 520, "protein_g": 22, "carbs_g": 46, "fat_g": 24 },
-      "tags": ["meal", "vegetarian", "indian"],
+      "macros": {"calories": 520, "protein_g": 22, "carbs_g": 46, "fat_g": 24},
+      "tags": ["heavy", "high_fat", "indian", "meal", "vegetarian"],
       "cuisines": ["indian"],
-      "eligible_telegram_user_ids": [559404539]
+      "meal_type": "full_meal",
+      "contains": ["dairy", "gluten"],
+      "available": true,
+      "nutrition_source": "Legacy curated serving estimate; not a verified restaurant or package label. See docs/RECOMMENDATIONS.md."
     },
     {
       "food_id": "dosa_sambar_set",
       "name": "Dosa and Sambar Set",
       "serving": "2 dosa with sambar",
-      "macros": { "calories": 390, "protein_g": 12, "carbs_g": 58, "fat_g": 12 },
-      "tags": ["meal", "vegetarian", "indian", "light"],
+      "macros": {"calories": 390, "protein_g": 12, "carbs_g": 58, "fat_g": 12},
+      "tags": ["indian", "light", "meal", "vegan", "vegetarian"],
       "cuisines": ["indian"],
-      "eligible_telegram_user_ids": [559404539]
+      "meal_type": "light_meal",
+      "contains": [],
+      "available": true,
+      "nutrition_source": "Legacy curated serving estimate; not a verified restaurant or package label. See docs/RECOMMENDATIONS.md."
     },
     {
       "food_id": "poha_curd_plate",
       "name": "Poha with Curd",
       "serving": "1 bowl poha with side curd",
-      "macros": { "calories": 360, "protein_g": 12, "carbs_g": 54, "fat_g": 10 },
-      "tags": ["meal", "vegetarian", "indian", "light"],
+      "macros": {"calories": 360, "protein_g": 12, "carbs_g": 54, "fat_g": 10},
+      "tags": ["indian", "light", "meal", "vegetarian"],
       "cuisines": ["indian"],
-      "eligible_telegram_user_ids": [559404539]
+      "meal_type": "light_meal",
+      "contains": ["dairy"],
+      "available": true,
+      "nutrition_source": "Legacy curated serving estimate; not a verified restaurant or package label. See docs/RECOMMENDATIONS.md."
     },
     {
       "food_id": "chickpea_salad_wrap",
       "name": "Chickpea Salad Wrap",
       "serving": "1 wrap with chickpeas and yogurt dressing",
-      "macros": { "calories": 410, "protein_g": 18, "carbs_g": 48, "fat_g": 14 },
-      "tags": ["meal", "vegetarian", "quick"],
+      "macros": {"calories": 410, "protein_g": 18, "carbs_g": 48, "fat_g": 14},
+      "tags": ["meal", "quick", "vegetarian"],
       "cuisines": ["western"],
-      "eligible_telegram_user_ids": [559404539]
+      "meal_type": "light_meal",
+      "contains": ["gluten", "dairy"],
+      "available": true,
+      "nutrition_source": "Legacy curated serving estimate; not a verified restaurant or package label. See docs/RECOMMENDATIONS.md."
     },
     {
       "food_id": "paneer_bhurji_toast",
       "name": "Paneer Bhurji Toast",
       "serving": "paneer bhurji with 2 toast slices",
-      "macros": { "calories": 440, "protein_g": 24, "carbs_g": 30, "fat_g": 22 },
-      "tags": ["meal", "vegetarian", "indian", "protein"],
+      "macros": {"calories": 440, "protein_g": 24, "carbs_g": 30, "fat_g": 22},
+      "tags": ["high_fat", "indian", "meal", "protein", "vegetarian"],
       "cuisines": ["indian"],
-      "eligible_telegram_user_ids": [559404539]
+      "meal_type": "full_meal",
+      "contains": ["dairy", "gluten"],
+      "available": true,
+      "nutrition_source": "Legacy curated serving estimate; not a verified restaurant or package label. See docs/RECOMMENDATIONS.md."
     },
     {
       "food_id": "fruit_nut_snack",
       "name": "Fruit and Nut Snack",
       "serving": "1 fruit with a small nut portion",
-      "macros": { "calories": 240, "protein_g": 6, "carbs_g": 24, "fat_g": 12 },
-      "tags": ["snack", "vegetarian", "quick"],
+      "macros": {"calories": 240, "protein_g": 6, "carbs_g": 24, "fat_g": 12},
+      "tags": ["quick", "snack", "vegan", "vegetarian"],
       "cuisines": [],
-      "eligible_telegram_user_ids": [559404539, 349553317]
+      "meal_type": "snack",
+      "contains": ["nuts"],
+      "available": true,
+      "nutrition_source": "Legacy curated serving estimate; not a verified restaurant or package label. See docs/RECOMMENDATIONS.md."
     },
     {
       "food_id": "lean_chicken_salad",
       "name": "Lean Chicken Salad",
       "serving": "1 salad bowl with chicken",
-      "macros": { "calories": 350, "protein_g": 36, "carbs_g": 18, "fat_g": 14 },
-      "tags": ["meal", "high_protein", "light"],
+      "macros": {"calories": 350, "protein_g": 36, "carbs_g": 18, "fat_g": 14},
+      "tags": ["high_protein", "light", "meal"],
       "cuisines": ["western"],
-      "eligible_telegram_user_ids": [349553317]
+      "meal_type": "light_meal",
+      "contains": ["poultry"],
+      "available": true,
+      "nutrition_source": "Legacy curated serving estimate; not a verified restaurant or package label. See docs/RECOMMENDATIONS.md."
+    },
+    {
+      "food_id": "plain_greek_yogurt",
+      "name": "Plain Nonfat Greek Yogurt",
+      "serving": "200g plain nonfat Greek yogurt",
+      "macros": {"calories": 120, "protein_g": 22, "carbs_g": 8, "fat_g": 0},
+      "meal_type": "protein_top_up",
+      "contains": ["dairy"],
+      "tags": ["vegetarian", "high_protein", "low_fat", "light", "late_evening_friendly"],
+      "cuisines": ["western"],
+      "available": true,
+      "nutrition_source": "Curated reference-serving approximation for recommendation planning, not measured intake or verified product nutrition. See docs/RECOMMENDATIONS.md."
+    },
+    {
+      "food_id": "whey_water",
+      "name": "Whey with Water",
+      "serving": "30g whey powder with water",
+      "macros": {"calories": 120, "protein_g": 24, "carbs_g": 3, "fat_g": 1},
+      "meal_type": "protein_top_up",
+      "contains": ["dairy"],
+      "tags": ["vegetarian", "high_protein", "low_fat", "light", "late_evening_friendly"],
+      "cuisines": [],
+      "available": true,
+      "nutrition_source": "Curated reference-serving approximation for recommendation planning, not measured intake or verified product nutrition. See docs/RECOMMENDATIONS.md."
+    },
+    {
+      "food_id": "soy_protein_water",
+      "name": "Soy Protein with Water",
+      "serving": "30g soy protein powder with water",
+      "macros": {"calories": 120, "protein_g": 24, "carbs_g": 3, "fat_g": 1},
+      "meal_type": "protein_top_up",
+      "contains": ["soy"],
+      "tags": ["vegan", "vegetarian", "high_protein", "low_fat", "light", "late_evening_friendly", "dairy_free"],
+      "cuisines": [],
+      "available": true,
+      "nutrition_source": "Curated reference-serving approximation for recommendation planning, not measured intake or verified product nutrition. See docs/RECOMMENDATIONS.md."
+    },
+    {
+      "food_id": "tofu_clear_soup",
+      "name": "Tofu Clear Soup",
+      "serving": "250g firm tofu, vegetables and clear broth; no added oil",
+      "macros": {"calories": 260, "protein_g": 26, "carbs_g": 12, "fat_g": 12},
+      "meal_type": "light_meal",
+      "contains": ["soy"],
+      "tags": ["vegan", "vegetarian", "high_protein", "light", "late_evening_friendly", "dairy_free"],
+      "cuisines": ["asian"],
+      "available": true,
+      "nutrition_source": "Curated reference-serving approximation for recommendation planning, not measured intake or verified product nutrition. See docs/RECOMMENDATIONS.md."
+    },
+    {
+      "food_id": "lentil_tofu_bowl",
+      "name": "Lentil and Tofu Bowl",
+      "serving": "150g cooked lentils, 150g tofu, vegetables and 100g cooked rice",
+      "macros": {"calories": 500, "protein_g": 32, "carbs_g": 64, "fat_g": 12},
+      "meal_type": "full_meal",
+      "contains": ["soy"],
+      "tags": ["vegan", "vegetarian", "high_protein", "dairy_free"],
+      "cuisines": ["indian"],
+      "available": true,
+      "nutrition_source": "Curated reference-serving approximation for recommendation planning, not measured intake or verified product nutrition. See docs/RECOMMENDATIONS.md."
+    },
+    {
+      "food_id": "chicken_small_rice",
+      "name": "Grilled Chicken with Smaller Rice Portion",
+      "serving": "150g lean cooked chicken, 100g cooked rice and vegetables; light oil",
+      "macros": {"calories": 460, "protein_g": 48, "carbs_g": 40, "fat_g": 12},
+      "meal_type": "full_meal",
+      "contains": ["poultry"],
+      "tags": ["high_protein"],
+      "cuisines": ["asian"],
+      "available": true,
+      "nutrition_source": "Curated reference-serving approximation for recommendation planning, not measured intake or verified product nutrition. See docs/RECOMMENDATIONS.md."
     }
   ]
 }

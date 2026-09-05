@@ -22,6 +22,7 @@ from macro_bot.formatting import (
     build_setup_keyboard,
     build_mini_app_direct_link,
     format_pending_message,
+    format_nutrition_state_message,
     format_profile_setup_message,
     format_recommendation_message,
     format_workout_setup_message,
@@ -400,19 +401,23 @@ async def _expire_meal_actions() -> int:
         return 0
     bot = _bot()
     for action in actions:
-        if action.message_id is None or not action.chat_id:
-            continue
+        if action.telegram_user_id <= 0 or not action.chat_id:
+            continue  # The synthetic account has no Telegram destination.
         try:
-            await bot.edit_message_text(
-                chat_id=action.chat_id,
-                message_id=action.message_id,
-                text=f"{format_pending_message(action)}\n\n✅ Logged automatically after timeout",
-                reply_markup=None,
-            )
+            identity = service.resolve_user(action.telegram_user_id)
+            sent = await _send_confirmed_state(service, identity, bot, action.chat_id, action, automatic=True)
+            if action.message_id:
+                try:
+                    await bot.edit_message_text(chat_id=action.chat_id, message_id=action.message_id,
+                                                text="✅ Logged automatically after timeout", reply_markup=None)
+                except Exception as err:
+                    logger.warning("meal_action_expiry_message_update_failed error_type=%s", type(err).__name__)
+            if sent:
+                meal = service.repository.get_meal(identity, action.meal_id)
+                await _recommend_after_confirm(service, identity, bot, action.chat_id, meal.eaten_at, deterministic=True)
         except Exception as err:
-            # The meal is already durably confirmed; an old/deleted Telegram
-            # message must not make the scheduled sweep retry the meal.
-            logger.warning("meal_action_expiry_message_update_failed error_type=%s", type(err).__name__)
+            # The scheduled sweep never reverts or retries the durable confirmation.
+            logger.warning("meal_action_expiry_notification_failed error_type=%s", type(err).__name__)
     return len(actions)
 
 
@@ -562,27 +567,63 @@ async def _handle_workout(
     )
 
 
-async def _handle_recommendation(service: NutritionService, identity: Any, bot: Any, chat_id: int) -> None:
+async def _handle_recommendation(service: NutritionService, identity: Any, bot: Any, chat_id: int,
+                                 *, post_log: bool = False, deterministic: bool = False) -> None:
+    logger.info("nutrition_recommendation_started user_fingerprint=%s", _fingerprint(identity.user_id))
+    stage = "generation"
     try:
-        if hasattr(service, "recommendation_async"):
+        if hasattr(service, "recommendation_async") and not deterministic:
             result, _prepared = await service.recommendation_async(identity)
         else:
             result, _prepared = service.recommendation(identity)
-    except KeyError:
-        url = os.getenv("MINI_APP_URL", "").strip()
-        await _send(bot, chat_id, format_profile_setup_message(url), build_setup_keyboard(url))
-        return
+        outcome = {"model_ranked": "model_ranked", "deterministic_fallback": "fallback", "skipped": "skipped"}.get(result.source, "fallback")
+        logger.info("nutrition_recommendation_%s user_fingerprint=%s strategy_version=%s suggestions=%s",
+                    outcome, _fingerprint(identity.user_id), result.strategy_version, len(result.suggestions))
+        if result.source == "skipped" or not result.suggestions:
+            return
+        stage = "formatting"
+        text = format_recommendation_message(result)
+        if not text:
+            return
+        stage = "telegram_send"
+        await _send(bot, chat_id, text)
+        logger.info("nutrition_message2_sent user_fingerprint=%s", _fingerprint(identity.user_id))
+    except KeyError as err:
+        if not post_log and stage == "generation":
+            url = os.getenv("MINI_APP_URL", "").strip()
+            await _send(bot, chat_id, format_profile_setup_message(url), build_setup_keyboard(url))
+        else:
+            logger.warning("nutrition_message2_failed user_fingerprint=%s stage=%s error_category=%s",
+                           _fingerprint(identity.user_id), stage, type(err).__name__)
     except Exception as err:
-        logger.warning("nutrition_recommendation_failed user_fingerprint=%s error_category=%s", _fingerprint(identity.user_id), type(err).__name__)
-        return
-    logger.info(
-        "nutrition_recommendation_completed user_fingerprint=%s source=%s strategy_version=%s suggestions=%s",
-        _fingerprint(identity.user_id),
-        result.source,
-        getattr(result, "strategy_version", "nutrition-recommendation-v2"),
-        len(result.suggestions),
-    )
-    await _send(bot, chat_id, format_recommendation_message(result))
+        # Ranking, formatting and Telegram failures must never retry meal confirmation.
+        logger.warning("nutrition_message2_failed user_fingerprint=%s stage=%s error_category=%s",
+                       _fingerprint(identity.user_id), stage, type(err).__name__)
+
+
+async def _send_confirmed_state(service, identity, bot, chat_id, action, *, automatic=False):
+    if service.nutrition_message_sent(identity, action.token):
+        return False
+    state = service.confirmed_nutrition_payload(identity, action.meal_id)
+    sent = await _send(bot, chat_id, format_nutrition_state_message(state, automatic=automatic))
+    logger.info("nutrition_message1_sent user_fingerprint=%s", _fingerprint(identity.user_id))
+    try:
+        service.mark_nutrition_message_sent(identity, action.token, sent.message_id)
+    except Exception as err:
+        logger.warning("nutrition_message1_receipt_failed user_fingerprint=%s error_category=%s",
+                       _fingerprint(identity.user_id), type(err).__name__)
+    return True
+
+
+async def _recommend_after_confirm(service, identity, bot, chat_id, eaten_at, *, deterministic=False):
+    try:
+        if service.should_recommend_after_meal(identity, eaten_at):
+            await _handle_recommendation(service, identity, bot, chat_id, post_log=True, deterministic=deterministic)
+        else:
+            logger.info("nutrition_recommendation_skipped user_fingerprint=%s reason=historical", _fingerprint(identity.user_id))
+    except Exception as err:
+        logger.warning("nutrition_message2_failed user_fingerprint=%s stage=preparation error_category=%s",
+                       _fingerprint(identity.user_id), type(err).__name__)
 
 
 async def _handle_photo(
@@ -885,27 +926,26 @@ async def _handle_callback(
         if callback_id:
             await bot.answer_callback_query(callback_query_id=callback_id, text=str(err)[:180])
         return
-    if callback_id:
-        await bot.answer_callback_query(
-            callback_query_id=callback_id,
-            text="Meal logged automatically after timeout." if result.status == "confirmed" else None,
-        )
     message = callback.get("message")
-    if isinstance(message, Mapping):
-        chat_id = _chat_id(message)
-        message_id = _message_id(message)
-        if chat_id is not None and message_id:
-            if result.status == "confirmed":
-                suffix = "✅ Logged automatically after timeout" if auto_confirmed else "✅ Logged"
-                text = f"{format_pending_message(result.action)}\n\n{suffix}"
-            else:
-                text = f"{format_pending_message(result.action)}\n\n❌ Cancelled — please re-upload the photo (add caption if possible)."
+    chat_id = _chat_id(message) if isinstance(message, Mapping) else result.action.chat_id
+    message_id = _message_id(message) if isinstance(message, Mapping) else result.action.message_id
+    state_sent = False
+    if result.status == "confirmed" and chat_id:
+        # Duplicate finalization is safe: retry a failed Message 1 until its receipt exists.
+        state_sent = await _send_confirmed_state(service, identity, bot, chat_id, result.action, automatic=auto_confirmed)
+    if callback_id:
+        try:
+            await bot.answer_callback_query(callback_query_id=callback_id)
+        except Exception as err:
+            logger.warning("meal_callback_ack_failed error_category=%s", type(err).__name__)
+    if chat_id and message_id:
+        text = ("✅ Logged automatically after timeout" if auto_confirmed else "✅ Meal logged") if result.status == "confirmed" else "❌ Cancelled — please re-upload the photo (add caption if possible)."
+        try:
             await bot.edit_message_text(chat_id=chat_id, message_id=message_id, text=text, reply_markup=None)
-            if result.status == "confirmed" and not result.duplicate and (
-                not hasattr(service, "should_recommend_after_meal")
-                or service.should_recommend_after_meal(identity, getattr(result.meal, "eaten_at", None))
-            ):
-                await _handle_recommendation(service, identity, bot, chat_id)
+        except Exception as err:
+            logger.warning("meal_finalized_message_update_failed error_category=%s", type(err).__name__)
+    if state_sent and result.status == "confirmed":
+        await _recommend_after_confirm(service, identity, bot, chat_id, result.meal.eaten_at)
 
 
 async def process_update_message(

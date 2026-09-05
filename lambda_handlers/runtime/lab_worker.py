@@ -16,5 +16,8 @@ def handler(event, context):
         boto3.resource("dynamodb").Table(table_name), table_name=table_name, client=boto3.client("dynamodb"),
     ))
     lab = NutritionLab(service)
+    if event == {"operation": "recommendation_scenarios"}:
+        # IAM-invoked dev smoke only. No HTTP route, clock input or Telegram destination.
+        return asyncio.run(lab.recommendation_scenarios())
     asyncio.run(lab.process(event.get("job_id", ""), event.get("operation", "")))
     return {"processed": True}

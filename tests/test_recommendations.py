@@ -1,7 +1,7 @@
 import json
 import tempfile
 import unittest
-from datetime import date
+from datetime import date, datetime, timezone
 from pathlib import Path
 
 from macro_bot.models import LoggedMealRow
@@ -149,6 +149,7 @@ class RecommendationPlannerTests(unittest.IsolatedAsyncioTestCase):
                 profile_store=UserProfileStore(tmp_path / "profiles.json"),
                 food_catalog_store=FoodCatalogStore(tmp_path / "foods.json"),
                 recommendation_client=_EchoRecommendationClient(),
+                now_fn=lambda: datetime(2026, 4, 8, 10, tzinfo=timezone.utc),
             )
 
             prepared = planner.prepare(559404539, target_date=date(2026, 4, 8))
@@ -172,6 +173,7 @@ class RecommendationPlannerTests(unittest.IsolatedAsyncioTestCase):
                 profile_store=UserProfileStore(tmp_path / "profiles.json"),
                 food_catalog_store=FoodCatalogStore(tmp_path / "foods.json"),
                 recommendation_client=_FailingRecommendationClient(),
+                now_fn=lambda: datetime(2026, 4, 8, 10, tzinfo=timezone.utc),
             )
 
             result, prepared = await planner.recommend_next_meal(559404539, target_date=date(2026, 4, 8))
@@ -205,6 +207,7 @@ class RecommendationPlannerTests(unittest.IsolatedAsyncioTestCase):
                 profile_store=UserProfileStore(tmp_path / "profiles.json"),
                 food_catalog_store=FoodCatalogStore(tmp_path / "foods.json"),
                 recommendation_client=_EchoRecommendationClient(),
+                now_fn=lambda: datetime(2026, 4, 8, 10, tzinfo=timezone.utc),
             )
 
             result, prepared = await planner.recommend_next_meal(559404539, target_date=date(2026, 4, 8))

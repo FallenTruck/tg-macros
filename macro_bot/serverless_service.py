@@ -421,6 +421,36 @@ class NutritionService:
     def auto_confirm_expired_action(self, identity: ServerlessIdentity, token: str):
         return self.repository.auto_confirm_expired_action(identity, token)
 
+    def confirmed_nutrition_payload(self, identity: ServerlessIdentity, meal_id: str):
+        """Rebuild Message 1 from persisted final macros and confirmed local-day meals."""
+        meal = self.repository.get_meal(identity, meal_id)
+        if meal is None or meal.status != "confirmed":
+            raise ActionNotFound("Confirmed meal was not found")
+        profile = self.repository.get_profile(identity.user_id)
+        zone = ZoneInfo(profile.timezone if profile else DEFAULT_TIMEZONE)
+        meal_date = parse_utc(meal.eaten_at).astimezone(zone).date()
+        payload = self.daily_nutrition_payload(identity, meal_date)
+        if payload["target"] is None and profile:
+            payload["target"] = profile.daily_target.to_payload()
+            payload["remaining"] = RemainingMacros.from_target_and_consumed(
+                profile.daily_target, MacroTotal.from_payload(payload["consumed"])
+            ).remaining.to_payload()
+        payload["this_meal"] = meal.macros.to_payload()
+        return payload
+
+    def nutrition_message_sent(self, identity: ServerlessIdentity, token: str) -> bool:
+        item = self.repository._get({"PK": identity.pk, "SK": f"ACTION#{token}"})
+        return bool(item and item.get("nutrition_message_id"))
+
+    def mark_nutrition_message_sent(self, identity: ServerlessIdentity, token: str, message_id: int):
+        self.repository.table.update_item(
+            Key={"PK": identity.pk, "SK": f"ACTION#{token}"},
+            UpdateExpression="SET nutrition_message_id = :message",
+            ConditionExpression="#status = :confirmed",
+            ExpressionAttributeNames={"#status": "status"},
+            ExpressionAttributeValues={":message": message_id, ":confirmed": "confirmed"},
+        )
+
     def expire_pending_actions(self, *, limit: int = 100):
         return self.repository.expire_pending_actions(limit=limit)
 
@@ -440,6 +470,7 @@ class NutritionService:
             _DynamoProfileStore(self.repository, identity),
             self.catalog_store,
             recommendation_client=self._planner._recommendation_client,
+            now_fn=self._now,
         )
 
     async def recommendation_async(self, identity: ServerlessIdentity):

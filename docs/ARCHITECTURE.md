@@ -259,3 +259,16 @@ Recommendation adapters bind their reads to the supplied canonical identity,
 including synthetic identities without a Telegram account. No synthetic
 `IDENTITY#TELEGRAM#0` record is resolved or created. See E2E_TESTING.md for the
 four-part deployment gate, identity proof, image cleanup, and live checks.
+
+### Post-confirmation nutrition messages
+
+The worker now sends a persisted-state nutrition message before preparing any
+recommendation. Confirmed daily totals are rebuilt using strongly consistent
+meal reads, and the action stores a first-message receipt. A separate best-effort
+recommendation uses profile-local time and the 23:30 bedtime policy, explicit
+catalogue meal types and deterministic scoring before bounded model ranking.
+Historical dates and non-useful suggestions are suppressed; recommendation
+errors cannot undo confirmation or trigger a confirmation retry. Scheduled
+expiry uses the same messages with deterministic fallback to avoid serial model
+latency. See [RECOMMENDATIONS.md](RECOMMENDATIONS.md) for exact policy, scores,
+delivery semantics and test coverage.

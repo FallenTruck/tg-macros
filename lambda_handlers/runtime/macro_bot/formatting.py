@@ -133,46 +133,39 @@ def _format_macro_total_inline(calories: float, protein_g: float, carbs_g: float
     )
 
 
+def format_nutrition_state_message(state: dict, *, automatic: bool = False) -> str:
+    meal, consumed = state["this_meal"], state["consumed"]
+    target, remaining = state.get("target"), state.get("remaining")
+    title = "✅ Meal logged automatically after timeout" if automatic else "✅ Meal logged"
+    day = "Today" if state["date"] == state["today"] else f"Logged day · {state['date']}"
+    lines = [title, "", "This meal", f"{meal['calories']:,.0f} kcal",
+             f"P {meal['protein_g']:.0f}g · C {meal['carbs_g']:.0f}g · F {meal['fat_g']:.0f}g", "", day]
+    if target:
+        lines.append(f"{consumed['calories']:,.0f} / {target['calories']:,.0f} kcal")
+        for label, key in (("Protein", "protein_g"), ("Carbs", "carbs_g"), ("Fat", "fat_g")):
+            lines.extend(["", label, f"{consumed[key]:.0f} / {target[key]:.0f}g"])
+        lines.extend(["", "Remaining", f"{remaining['calories']:,.0f} kcal",
+                      f"{remaining['protein_g']:.0f}g protein · {remaining['carbs_g']:.0f}g carbs · {remaining['fat_g']:.0f}g fat"])
+    else:
+        lines.extend([_format_macro_total_inline(**consumed), "Set daily targets in your profile to see what remains."])
+    return "\n".join(lines)
+
+
 def format_recommendation_message(result: RecommendationResult) -> str:
-    if not result.suggestions:
-        return (
-            "✅ Recommendation check\n"
-            f"- Status: {result.summary}\n"
-            f"- Today: {_format_macro_total_inline(**result.today_totals.to_payload())}\n"
-            f"- Remaining: {_format_macro_total_inline(**result.remaining_macros.to_payload())}"
-        )
-
-    lines = [
-        "🥗 Next meal suggestions",
-        f"- Summary: {result.summary}",
-        (
-            "- Today: "
-            f"{_format_macro_total_inline(**result.today_totals.to_payload())}"
-        ),
-        (
-            "- Remaining: "
-            f"{_format_macro_total_inline(**result.remaining_macros.to_payload())}"
-        ),
-    ]
-
-    for index, suggestion in enumerate(result.suggestions, start=1):
-        lines.extend(
-            [
-                f"{index}. {suggestion.name} ({suggestion.serving})",
-                "   "
-                + _format_macro_total_inline(
-                    suggestion.calories,
-                    suggestion.protein_g,
-                    suggestion.carbs_g,
-                    suggestion.fat_g,
-                ),
-                f"   Why: {suggestion.fit_rationale}",
-                f"   Watch: {suggestion.tradeoffs}",
-            ]
-        )
-
+    if result.source == "skipped" or not result.suggestions:
+        return ""
+    lines = ["🥗 What to eat next", "", result.summary[:500]]
+    for index, suggestion in enumerate(result.suggestions[:3], start=1):
+        lines.extend(["", f"{index}. {suggestion.name[:100]}",
+                      f"{suggestion.serving[:130]}",
+                      f"~{suggestion.calories:.0f} kcal · {suggestion.protein_g:.0f}g protein",
+                      suggestion.fit_rationale[:160]])
+        if suggestion.tradeoffs:
+            lines.append(suggestion.tradeoffs[:140])
     message = "\n".join(lines)
-    return message if len(message) <= 4000 else message[:3990].rstrip() + "…"
+    # Telegram counts UTF-16 units; emoji may occupy two units each.
+    encoded = message.encode("utf-16-le")
+    return message if len(encoded) <= 8000 else encoded[:7998].decode("utf-16-le", errors="ignore").rstrip() + "…"
 
 
 def format_profile_setup_message(setup_url: str) -> str:
