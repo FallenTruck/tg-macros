@@ -1,5 +1,11 @@
 # Real-food regression corpus
 
+This is intentionally a **repeatability/variance corpus, not yet an accuracy
+benchmark**. Cases still mostly lack weighed portions and defensible macro
+ground truth. Repeated estimates measure consistency; accuracy measurements
+require independently documented reference labels. Previous model estimates
+must not be used as ground truth.
+
 The versioned `manifest.json` and image files are the fixture registry. The local
 SQLite database at `artifacts/nutrition/corpus.sqlite3` keeps cases, batches, and
 individual results across test runs. It is outside the synthetic account reset

@@ -1,5 +1,11 @@
 # E2E Nutrition Lab checklist completion — 2026-09-06
 
+This is intentionally a **repeatability/variance corpus, not yet an accuracy
+benchmark**. Cases still mostly lack weighed portions and defensible macro
+ground truth. Repeated estimates measure consistency; accuracy measurements
+require independently documented reference labels. Previous model estimates
+must not be used as ground truth.
+
 The deployed Lab is an evaluation harness, available at the Mini App's hidden
 `#nutrition-lab` route only to the marked `javaan-e2e` browser session. It is not
 an end-user meal-entry feature. The production estimator, preprocessing,
