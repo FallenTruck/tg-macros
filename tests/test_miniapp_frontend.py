@@ -161,7 +161,7 @@ class MiniAppFrontendTests(unittest.TestCase):
         self.assertIn('id="nutrition-view"', markup)
         self.assertIn('data-testid="nav-nutrition"', markup)
         self.assertIn('normalizeDateKey(day.today)', source)
-        self.assertIn('data-testid="nutrition-progress-${key}"', source)
+        self.assertIn('data-testid="${prefix}-progress-${key}"', source)
         self.assertIn('data-testid="nutrition-meal-${escapeHtml(mealId)}"', source)
         self.assertIn("Only confirmed Telegram meals are included.", source)
         self.assertIn("nutrition-progress-grid", styles)

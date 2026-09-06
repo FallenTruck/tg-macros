@@ -29,6 +29,11 @@ const state = {
   meta: null,
   profile: null,
   nutritionDay: null,
+  nutritionToday: null,
+  nutritionDate: "",
+  nutritionTodayError: "",
+  nutritionTodayLoading: false,
+  nutritionLoading: false,
   preview: null,
   workoutProgramme: null,
   activeWorkout: null,
@@ -40,6 +45,8 @@ const state = {
   nutritionError: "",
   labAuthorized: null,
 };
+let nutritionDayRequest = null;
+let nutritionTodayRequest = null;
 
 const form = document.querySelector("#questionnaire-form");
 const settingsForm = document.querySelector("#nutrition-settings-form");
@@ -119,6 +126,8 @@ const homeDailySummaryTitle = document.querySelector("#home-daily-summary-title"
 const homeDailySummaryMeta = document.querySelector("#home-daily-summary-meta");
 const homeDailySummaryEmpty = document.querySelector("#home-daily-summary-empty");
 const homeDailySummaryMacros = document.querySelector("#home-daily-summary-macros");
+const homeNutritionRefresh = document.querySelector("#home-nutrition-refresh");
+const homeNutritionStatus = document.querySelector("#home-nutrition-status");
 
 const nutritionView = document.querySelector("#nutrition-view");
 const nutritionDayTitle = document.querySelector("#nutrition-day-title");
@@ -128,12 +137,16 @@ const nutritionPreviousDay = document.querySelector("#nutrition-previous-day");
 const nutritionNextDay = document.querySelector("#nutrition-next-day");
 const nutritionProgressTitle = document.querySelector("#nutrition-progress-title");
 const nutritionProgressMeta = document.querySelector("#nutrition-progress-meta");
+const nutritionTargetDetails = document.querySelector("#nutrition-target-details");
 const nutritionProgressEmpty = document.querySelector("#nutrition-progress-empty");
 const nutritionProgressGrid = document.querySelector("#nutrition-progress-grid");
 const nutritionMealsTitle = document.querySelector("#nutrition-meals-title");
 const nutritionMealsMeta = document.querySelector("#nutrition-meals-meta");
 const nutritionMealsEmpty = document.querySelector("#nutrition-meals-empty");
 const nutritionMealsList = document.querySelector("#nutrition-meals-list");
+const nutritionLogMealHint = document.querySelector("#nutrition-log-meal-hint");
+const nutritionRefresh = document.querySelector("#nutrition-refresh");
+const nutritionRefreshStatus = document.querySelector("#nutrition-refresh-status");
 
 const viewerInitial = document.querySelector("#viewer-initial");
 const profileViewerTitle = document.querySelector("#profile-viewer-title");
@@ -156,6 +169,13 @@ if (tg) {
 }
 
 window.addEventListener("hashchange", syncRoute);
+window.addEventListener("focus", refreshVisibleNutrition);
+document.addEventListener("visibilitychange", () => {
+  if (document.visibilityState === "visible") refreshVisibleNutrition();
+});
+homeNutritionRefresh.addEventListener("click", () => {
+  if (state.hasAuth) loadTodayNutrition().catch(() => {});
+});
 
 browserLoginForm?.addEventListener("submit", handleBrowserLogin);
 logoutButton?.addEventListener("click", handleBrowserLogout);
@@ -223,7 +243,10 @@ saveButton.addEventListener("click", async () => {
     renderQuestionnaireContext();
     renderPreview();
     try {
-      await loadDailyNutrition(state.nutritionDay?.date || null);
+      await Promise.all([
+        loadDailyNutrition(state.nutritionDate),
+        ...(state.nutritionDate ? [loadTodayNutrition()] : []),
+      ]);
     } catch (_error) {
       // Keep the saved profile success state even if the dashboard refresh fails.
     }
@@ -395,6 +418,15 @@ async function handleBrowserLogout() {
     clearNutritionLab();
     state.profile = null;
     state.nutritionDay = null;
+    state.nutritionToday = null;
+    state.nutritionDate = "";
+    state.nutritionError = "";
+    state.nutritionTodayError = "";
+    state.nutritionLoading = false;
+    state.nutritionTodayLoading = false;
+    // Ignore reads started by the session that has just signed out.
+    nutritionDayRequest = null;
+    nutritionTodayRequest = null;
     state.preview = null;
     state.workoutProgramme = null;
     state.activeWorkout = null;
@@ -431,22 +463,76 @@ async function loadActiveWorkout() {
   }
 }
 
-async function loadDailyNutrition(targetDate = null) {
+function fetchNutritionDay(targetDate = null) {
   const normalizedDate = normalizeDateKey(targetDate);
   const query = normalizedDate ? `?date=${encodeURIComponent(normalizedDate)}` : "";
-  try {
-    const response = await apiFetch(`/api/nutrition/day${query}`);
-    state.nutritionDay = response;
-    state.nutritionError = "";
-    renderNutrition();
-    renderHomeSummary();
-    return response;
-  } catch (error) {
-    state.nutritionError = error.message || "Could not load your nutrition history.";
-    renderNutrition();
-    renderHomeSummary();
-    throw error;
-  }
+  return apiFetch(`/api/nutrition/day${query}`);
+}
+
+function loadTodayNutrition() {
+  if (nutritionTodayRequest) return nutritionTodayRequest.promise;
+  const request = {};
+  nutritionTodayRequest = request;
+  state.nutritionTodayLoading = true;
+  state.nutritionTodayError = "";
+  renderHomeDailySummary();
+  request.promise = (async () => {
+    try {
+      const response = await fetchNutritionDay();
+      if (nutritionTodayRequest === request) state.nutritionToday = response;
+      return response;
+    } catch (error) {
+      if (nutritionTodayRequest === request) {
+        state.nutritionTodayError = error.message || "Could not load today's nutrition.";
+      }
+      throw error;
+    } finally {
+      if (nutritionTodayRequest === request) {
+        nutritionTodayRequest = null;
+        state.nutritionTodayLoading = false;
+        renderHomeDailySummary();
+      }
+    }
+  })();
+  return request.promise;
+}
+
+function loadDailyNutrition(targetDate = null) {
+  const date = normalizeDateKey(targetDate);
+  if (nutritionDayRequest?.date === date) return nutritionDayRequest.promise;
+  const request = {date};
+  nutritionDayRequest = request;
+  // An empty date follows Today across midnight; explicit dates stay in history.
+  state.nutritionDate = date;
+  state.nutritionLoading = true;
+  state.nutritionError = "";
+  renderNutrition();
+  request.promise = (async () => {
+    try {
+      const response = await (date ? fetchNutritionDay(date) : loadTodayNutrition());
+      if (nutritionDayRequest === request) state.nutritionDay = response;
+      return response;
+    } catch (error) {
+      if (nutritionDayRequest === request) {
+        state.nutritionError = error.message || "Could not load your nutrition history.";
+      }
+      throw error;
+    } finally {
+      // A slow response must not replace a newer date selection or login session.
+      if (nutritionDayRequest === request) {
+        nutritionDayRequest = null;
+        state.nutritionLoading = false;
+        renderNutrition();
+      }
+    }
+  })();
+  return request.promise;
+}
+
+function refreshVisibleNutrition() {
+  if (!state.hasAuth || document.visibilityState !== "visible") return;
+  if (state.activeView === HOME_VIEW) loadTodayNutrition().catch(() => {});
+  if (state.activeView === NUTRITION_VIEW) loadDailyNutrition(state.nutritionDate).catch(() => {});
 }
 
 function buildViewerFromTelegram(user) {
@@ -532,6 +618,7 @@ function syncRoute() {
 }
 
 function renderRoute(route) {
+  const enteringView = route !== state.activeView;
   const enteringWorkout = route === WORKOUT_VIEW && state.activeView !== WORKOUT_VIEW;
   state.activeView = route;
   homeView.hidden = route !== HOME_VIEW;
@@ -553,6 +640,7 @@ function renderRoute(route) {
   if (enteringWorkout && state.activeWorkout?.session) {
     setWorkoutMode(WORKOUT_ACTIVE_MODE, {scrollToSession: true});
   }
+  if (enteringView) refreshVisibleNutrition();
 }
 
 function renderWorkoutProgramme() {
@@ -976,7 +1064,12 @@ function formatSetRange(min, max) {
 
 async function handleNutritionClick(event) {
   const button = event.target.closest("[data-action]");
-  if (!button || button.disabled || !state.nutritionDay) return;
+  if (!button || button.disabled || !state.hasAuth) return;
+  if (button.dataset.action === "refresh-nutrition") {
+    await loadDailyNutrition(state.nutritionDate).catch(() => {});
+    return;
+  }
+  if (!state.nutritionDay || state.nutritionLoading) return;
   const delta = button.dataset.action === "previous-day" ? -1 : button.dataset.action === "next-day" ? 1 : 0;
   if (!delta) return;
   const nextDate = shiftDateKey(state.nutritionDay.date, delta);
@@ -984,9 +1077,9 @@ async function handleNutritionClick(event) {
   nutritionPreviousDay.disabled = true;
   nutritionNextDay.disabled = true;
   try {
-    await loadDailyNutrition(nextDate);
-  } catch (error) {
-    setStatus(error.message || "Could not load that day.", "error");
+    await loadDailyNutrition(nextDate === state.nutritionDay.today ? null : nextDate);
+  } catch (_error) {
+    // The local refresh status keeps the previous data visible with a retry.
   } finally {
     renderNutrition();
   }
@@ -996,13 +1089,14 @@ function renderNutrition() {
   const day = state.nutritionDay;
   const hasDay = Boolean(day && normalizeDateKey(day.date));
   const target = day?.target;
+  renderNutritionRefresh(nutritionRefresh, nutritionRefreshStatus, state.nutritionLoading, state.nutritionError, hasDay);
 
   if (!hasDay) {
     nutritionDayTitle.textContent = "Nutrition history";
     nutritionDayMeta.textContent = state.nutritionError || "Your confirmed meals for the selected day.";
     nutritionDateLabel.textContent = "Loading date…";
     nutritionProgressTitle.textContent = state.nutritionError ? "Nutrition unavailable" : "Loading your progress…";
-    nutritionProgressMeta.textContent = "Target · consumed · remaining";
+    nutritionTargetDetails.hidden = true;
     nutritionProgressEmpty.textContent = state.nutritionError || "Your daily progress will appear here.";
     nutritionProgressEmpty.hidden = false;
     nutritionProgressGrid.hidden = true;
@@ -1017,31 +1111,36 @@ function renderNutrition() {
   }
 
   const today = normalizeDateKey(day.today) || todayDateKey(day.timezone);
-  nutritionDayTitle.textContent = day.date === today ? "Today" : formatNutritionDate(day.date);
-  nutritionDayMeta.textContent = `${day.meal_count || 0} confirmed ${(day.meal_count || 0) === 1 ? "meal" : "meals"} · ${day.timezone || "local time"}`;
+  nutritionLogMealHint.textContent = day.date === today
+    ? "Send a meal photo in Telegram."
+    : "For this date, use /logmeal in Telegram.";
+  nutritionDayTitle.textContent = day.date === today ? "Today" : "Meal history";
+  nutritionDayMeta.textContent = `${day.meal_count || 0} ${(day.meal_count || 0) === 1 ? "meal" : "meals"} logged`;
   nutritionDateLabel.textContent = formatNutritionDate(day.date);
-  nutritionPreviousDay.disabled = false;
-  nutritionNextDay.disabled = day.date >= today;
+  nutritionPreviousDay.disabled = state.nutritionLoading;
+  nutritionNextDay.disabled = state.nutritionLoading || day.date >= today;
 
   if (!target) {
-    nutritionProgressTitle.textContent = "No target saved yet";
-    nutritionProgressMeta.textContent = "Set a target in Profile to see remaining macros.";
-    nutritionProgressEmpty.textContent = "Open Profile to create your first calorie and macro target.";
+    nutritionProgressTitle.textContent = "Logged nutrition";
+    nutritionProgressEmpty.textContent = state.profile
+      ? "No target applies to this date. Your logged totals are shown below."
+      : "Set up your targets in Profile to see daily progress.";
     nutritionProgressEmpty.hidden = false;
-    nutritionProgressGrid.hidden = true;
   } else {
-    nutritionProgressTitle.textContent = `${formatNutritionAmount(target.calories, "calories")} target`;
+    nutritionProgressTitle.textContent = "Daily progress";
     nutritionProgressMeta.textContent = day.target_effective_at
       ? `Effective from ${formatIso(day.target_effective_at)}`
       : "Using your saved target";
     nutritionProgressEmpty.hidden = true;
-    nutritionProgressGrid.hidden = false;
-    nutritionProgressGrid.innerHTML = nutritionProgressCards(day);
   }
+  nutritionTargetDetails.hidden = !target;
+  nutritionProgressGrid.hidden = false;
+  nutritionProgressGrid.innerHTML = nutritionProgressCards(day);
 
   const meals = Array.isArray(day.meals) ? day.meals : [];
-  nutritionMealsTitle.textContent = `${meals.length} confirmed ${meals.length === 1 ? "meal" : "meals"}`;
-  nutritionMealsMeta.textContent = "Only confirmed Telegram meals are included.";
+  nutritionMealsTitle.textContent = "Meals";
+  nutritionMealsMeta.textContent = "By time eaten";
+  nutritionMealsMeta.title = "Only confirmed Telegram meals are included.";
   nutritionMealsEmpty.textContent = "No confirmed meals for this day.";
   nutritionMealsEmpty.hidden = meals.length > 0;
   nutritionMealsList.hidden = meals.length === 0;
@@ -1049,20 +1148,26 @@ function renderNutrition() {
   renderHomeDailySummary();
 }
 
-function nutritionProgressCards(day) {
+function nutritionProgressCards(day, prefix = "nutrition") {
   return NUTRITION_METRICS.map(([key, label]) => {
-    const consumed = day.consumed?.[key] ?? 0;
-    const target = day.target?.[key] ?? 0;
-    const rawRemaining = Number(day.remaining_raw?.[key] ?? day.remaining?.[key] ?? 0);
-    const remaining = day.remaining?.[key] ?? Math.max(0, rawRemaining);
-    const overTarget = rawRemaining < 0;
-    return `<article class="nutrition-progress-card" data-testid="nutrition-progress-${key}">
-      <div class="nutrition-progress-card-head"><span class="nutrition-progress-label">${label}</span><span class="nutrition-progress-unit">${key === "calories" ? "Daily total" : "Daily macro"}</span></div>
-      <div class="nutrition-progress-values">
-        <div><span>Consumed</span><strong>${escapeHtml(formatNutritionAmount(consumed, key))}</strong></div>
-        <div><span>Target</span><strong>${escapeHtml(formatNutritionAmount(target, key))}</strong></div>
+    const consumed = Number(day.consumed?.[key] ?? 0);
+    const target = Number(day.target?.[key] ?? 0);
+    const hasTarget = Boolean(day.target);
+    const isCalories = key === "calories";
+    const rawRemaining = Number(day.remaining_raw?.[key] ?? (target - consumed));
+    const overTarget = Math.round(rawRemaining) < 0;
+    const remainder = Math.round(rawRemaining) === 0 ? "Target reached"
+      : `${formatNutritionAmount(Math.abs(rawRemaining), key)} ${overTarget ? "over target" : isCalories ? "remaining" : "left"}`;
+    const consumedText = formatNutritionAmount(consumed, key);
+    const targetText = formatNutritionAmount(target, key);
+    const amount = Math.round(consumed).toLocaleString();
+    return `<article class="${isCalories ? "nutrition-calorie-progress" : "nutrition-macro-row"}" data-testid="${prefix}-progress-${key}">
+      <span class="nutrition-progress-label">${label}${isCalories ? " logged" : ""}</span>
+      <div class="nutrition-progress-values" aria-label="${escapeHtml(`${label}: ${consumedText} logged${hasTarget ? `, target ${targetText}` : ""}`)}">
+        <strong>${escapeHtml(hasTarget ? amount : consumedText)}</strong>${hasTarget ? `<span> / ${escapeHtml(targetText)}</span>` : ""}
       </div>
-      <p class="nutrition-progress-remaining${overTarget ? " is-over" : ""}">${escapeHtml(overTarget ? `${formatNutritionAmount(Math.abs(rawRemaining), key)} over target` : `${formatNutritionAmount(remaining, key)} remaining`)}</p>
+      ${isCalories && target > 0 ? `<progress class="nutrition-calorie-bar" max="${target}" value="${Math.max(0, Math.min(consumed, target))}" aria-label="Calories logged" aria-valuetext="${escapeHtml(`${consumedText} of ${targetText}${overTarget ? `, ${remainder}` : ""}`)}"></progress>` : ""}
+      ${hasTarget ? `<p class="nutrition-progress-remaining${overTarget ? " is-over" : ""}">${escapeHtml(remainder)}</p>` : ""}
     </article>`;
   }).join("");
 }
@@ -1084,30 +1189,38 @@ function nutritionMealCard(meal, timezone, index) {
 }
 
 function renderHomeDailySummary() {
-  const day = state.nutritionDay;
-  if (!day || !day.target) {
-    homeDailySummaryTitle.textContent = state.nutritionError ? "Nutrition unavailable" : "Nutrition loading…";
-    homeDailySummaryMeta.textContent = state.nutritionError || "Open Nutrition for the full day view.";
-    homeDailySummaryEmpty.textContent = state.nutritionError || "Your confirmed meals and daily progress will appear here.";
+  const savedDay = state.nutritionToday;
+  const day = savedDay?.date === todayDateKey(savedDay?.timezone) ? savedDay : null;
+  renderNutritionRefresh(homeNutritionRefresh, homeNutritionStatus, state.nutritionTodayLoading, state.nutritionTodayError, Boolean(day));
+  if (!day) {
+    homeDailySummaryTitle.textContent = state.nutritionTodayError ? "Nutrition unavailable" : "Nutrition loading…";
+    homeDailySummaryMeta.textContent = state.nutritionTodayError || "Open Nutrition for the full day view.";
+    homeDailySummaryEmpty.textContent = state.nutritionTodayError || "Your confirmed meals and daily progress will appear here.";
     homeDailySummaryEmpty.hidden = false;
     homeDailySummaryMacros.hidden = true;
     homeDailySummaryMacros.innerHTML = "";
     return;
   }
 
-  homeDailySummaryTitle.textContent = `${formatNutritionAmount(day.consumed?.calories, "calories")} consumed`;
-  homeDailySummaryMeta.textContent = `${formatNutritionAmount(day.target.calories, "calories")} target · ${day.meal_count || 0} confirmed ${(day.meal_count || 0) === 1 ? "meal" : "meals"}`;
+  homeDailySummaryTitle.textContent = "Today";
+  homeDailySummaryMeta.textContent = `${day.meal_count || 0} ${(day.meal_count || 0) === 1 ? "meal" : "meals"} logged`;
   homeDailySummaryEmpty.hidden = true;
   homeDailySummaryMacros.hidden = false;
-  homeDailySummaryMacros.innerHTML = NUTRITION_METRICS.map(([key, label]) => (
-    compactMacroCard(label, `${formatNutritionAmount(day.consumed?.[key], key)} / ${formatNutritionAmount(day.target?.[key], key)}`)
-  )).join("");
+  homeDailySummaryMacros.innerHTML = nutritionProgressCards(day, "home");
+}
+
+function renderNutritionRefresh(button, status, loading, error, hasData) {
+  button.disabled = !state.hasAuth || loading;
+  button.textContent = loading ? "Refreshing…" : error ? "Retry" : "Refresh";
+  status.textContent = error
+    ? `${hasData ? "Showing last loaded totals. " : ""}${error}`
+    : loading ? "Refreshing nutrition…" : "";
+  status.hidden = !status.textContent;
 }
 
 function formatNutritionAmount(value, key) {
   const amount = Number(value || 0);
-  if (key === "calories") return `${Math.round(amount)} kcal`;
-  return `${amount.toFixed(1)} g`;
+  return `${Math.round(amount).toLocaleString()} ${key === "calories" ? "kcal" : "g"}`;
 }
 
 function formatMealTime(value, timezone) {

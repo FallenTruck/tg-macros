@@ -64,6 +64,60 @@
 
       <section class="view-stack">
         <section class="app-view" id="home-view" data-view="home">
+          <section class="panel home-summary-panel home-daily-summary-panel">
+            <div class="panel-head">
+              <div>
+                <p class="section-label">Nutrition</p>
+                <h3 id="home-daily-summary-title">Nutrition loading…</h3>
+                <p id="home-daily-summary-meta">Open Nutrition for the full day view.</p>
+              </div>
+              <button class="ghost-button" id="home-nutrition-refresh" data-testid="home-nutrition-refresh" type="button">Refresh</button>
+            </div>
+            <div class="summary-empty" id="home-daily-summary-empty">
+              Your confirmed meals and daily progress will appear here.
+            </div>
+            <div class="nutrition-progress-grid" id="home-daily-summary-macros" hidden></div>
+            <div class="nutrition-refresh-controls">
+              <p id="home-nutrition-status" role="status" hidden></p>
+            </div>
+            <div class="nutrition-actions">
+              <a href="https://t.me/javaanfitness_bot" class="primary action-link" target="_blank" rel="noopener noreferrer" aria-describedby="home-log-meal-hint">Log meal</a>
+              <a href="#nutrition" class="ghost-button action-link">View meals →</a>
+            </div>
+            <p class="nutrition-action-hint" id="home-log-meal-hint">Send a meal photo in Telegram.</p>
+          </section>
+
+          <details class="panel home-summary-panel home-target-details">
+            <summary>Target details</summary>
+            <div class="panel-head">
+              <div>
+                <p class="section-label">Quick summary</p>
+                <h3 id="home-summary-title">No target saved yet</h3>
+              </div>
+              <p id="home-summary-meta">Profile setup lives under Profile.</p>
+            </div>
+
+            <div class="summary-empty" id="home-summary-empty">
+              Open Profile to create your first saved calorie and macro target.
+            </div>
+            <div class="mini-macro-grid" id="home-summary-macros" hidden></div>
+
+            <a href="#profile" class="primary summary-cta action-link" id="open-profile-button">
+              Set Up Targets
+            </a>
+          </details>
+
+          <section class="panel home-summary-panel">
+            <div class="panel-head">
+              <div>
+                <p class="section-label">Training</p>
+                <h3>Shared workout programme</h3>
+              </div>
+              <p>Pull · Support + Core · Push</p>
+            </div>
+            <p class="summary-empty">View the current shared programme and its planned training days.</p>
+            <a href="#workout" class="primary summary-cta action-link">View Programme</a>
+          </section>
           <section class="panel welcome-panel">
             <div class="welcome-copy">
               <p class="section-label">Dashboard</p>
@@ -81,51 +135,6 @@
             </div>
           </section>
 
-          <section class="panel home-summary-panel">
-            <div class="panel-head">
-              <div>
-                <p class="section-label">Quick summary</p>
-                <h3 id="home-summary-title">No target saved yet</h3>
-              </div>
-              <p id="home-summary-meta">Profile setup lives under Profile.</p>
-            </div>
-
-            <div class="summary-empty" id="home-summary-empty">
-              Open Profile to create your first saved calorie and macro target.
-            </div>
-            <div class="mini-macro-grid" id="home-summary-macros" hidden></div>
-
-            <a href="#profile" class="primary summary-cta action-link" id="open-profile-button">
-              Set Up Targets
-            </a>
-          </section>
-
-          <section class="panel home-summary-panel home-daily-summary-panel">
-            <div class="panel-head">
-              <div>
-                <p class="section-label">Today</p>
-                <h3 id="home-daily-summary-title">Nutrition loading…</h3>
-              </div>
-              <p id="home-daily-summary-meta">Open Nutrition for the full day view.</p>
-            </div>
-            <div class="summary-empty" id="home-daily-summary-empty">
-              Your confirmed meals and daily progress will appear here.
-            </div>
-            <div class="mini-macro-grid" id="home-daily-summary-macros" hidden></div>
-            <a href="#nutrition" class="secondary summary-cta action-link">Open Nutrition</a>
-          </section>
-
-          <section class="panel home-summary-panel">
-            <div class="panel-head">
-              <div>
-                <p class="section-label">Training</p>
-                <h3>Shared workout programme</h3>
-              </div>
-              <p>Pull · Support + Core · Push</p>
-            </div>
-            <p class="summary-empty">View the current shared programme and its planned training days.</p>
-            <a href="#workout" class="primary summary-cta action-link">View Programme</a>
-          </section>
         </section>
 
         <section class="app-view panel nutrition-lab" id="nutrition-lab" data-testid="nutrition-lab" hidden></section>
@@ -134,35 +143,44 @@
           <section class="panel nutrition-header-panel">
             <div class="panel-head">
               <div>
-                <p class="section-label">Nutrition</p>
                 <h2 id="nutrition-day-title">Today</h2>
+                <p id="nutrition-day-meta">Your confirmed meals for the selected day.</p>
               </div>
-              <p id="nutrition-day-meta">Your confirmed meals for the selected day.</p>
+              <button class="ghost-button" id="nutrition-refresh" data-testid="nutrition-refresh" data-action="refresh-nutrition" type="button">Refresh</button>
             </div>
             <div class="nutrition-day-nav" data-testid="nutrition-day-navigation">
-              <button class="ghost-button" id="nutrition-previous-day" data-testid="nutrition-previous-day" data-action="previous-day" type="button">← Previous day</button>
+              <button class="ghost-button" id="nutrition-previous-day" data-testid="nutrition-previous-day" data-action="previous-day" type="button" aria-label="Previous day">←</button>
               <span class="nutrition-date-label" id="nutrition-date-label">Loading date…</span>
-              <button class="ghost-button" id="nutrition-next-day" data-testid="nutrition-next-day" data-action="next-day" type="button">Next day →</button>
+              <button class="ghost-button" id="nutrition-next-day" data-testid="nutrition-next-day" data-action="next-day" type="button" aria-label="Next day">→</button>
+            </div>
+            <div class="nutrition-refresh-controls">
+              <p id="nutrition-refresh-status" role="status" hidden></p>
             </div>
           </section>
 
           <section class="panel nutrition-progress-panel">
             <div class="panel-head">
               <div>
-                <p class="section-label">Daily progress</p>
                 <h3 id="nutrition-progress-title">Loading your progress…</h3>
               </div>
-              <p id="nutrition-progress-meta">Target · consumed · remaining</p>
+              <details class="nutrition-target-details" id="nutrition-target-details" hidden>
+                <summary>Target details</summary>
+                <p id="nutrition-progress-meta"></p>
+                <a href="#profile">Manage targets in Profile</a>
+              </details>
             </div>
             <div class="summary-empty" id="nutrition-progress-empty" hidden></div>
             <div class="nutrition-progress-grid" id="nutrition-progress-grid" hidden></div>
+            <div class="nutrition-actions">
+              <a href="https://t.me/javaanfitness_bot" class="primary action-link" data-testid="nutrition-log-meal" target="_blank" rel="noopener noreferrer" aria-describedby="nutrition-log-meal-hint">Log meal</a>
+              <p class="nutrition-action-hint" id="nutrition-log-meal-hint">Send a meal photo<br />in Telegram.</p>
+            </div>
           </section>
 
           <section class="panel nutrition-meals-panel">
             <div class="panel-head">
               <div>
-                <p class="section-label">Meal history</p>
-                <h3 id="nutrition-meals-title">Confirmed meals</h3>
+                <h3 id="nutrition-meals-title">Meals</h3>
               </div>
               <p id="nutrition-meals-meta">No meals loaded yet.</p>
             </div>
