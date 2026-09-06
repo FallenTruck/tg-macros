@@ -30,10 +30,12 @@ from .models import (
     UserProfile,
 )
 from .workout_programme import (
+    CORE_OPTIONS_VERSION_ID,
     INITIAL_VERSION_ID,
     PROGRAMME_ID,
     PROGRAMME_PK,
     day_response,
+    core_options_programme_records,
     initial_programme_records,
     programme_response,
 )
@@ -448,6 +450,43 @@ class DynamoNutritionRepository:
                     raise ProgrammeSeedConflict(f"conflicting programme record after concurrent write: {key[0]} / {key[1]}") from err
                 already_existing += 1
         return {"created": created, "existing": already_existing, "would_create": 0, "records": len(records)}
+
+    def publish_core_options_programme(self, *, dry_run: bool = False) -> dict[str, Any]:
+        """Atomically publish additive core choices without rewriting old versions."""
+        pointers = [self._get({"PK": PROGRAMME_PK, "SK": sk}) for sk in ("META", "ACTIVE")]
+        if any(not item for item in pointers):
+            raise ProgrammeSeedConflict("Seed the initial programme before publishing core choices")
+        versions = {str(item.get("active_version_id")) for item in pointers}
+        if len(versions) != 1 or not versions <= {INITIAL_VERSION_ID, CORE_OPTIONS_VERSION_ID}:
+            raise ProgrammeSeedConflict("Unexpected active programme version")
+        expected_version = next(iter(versions))
+        operations = []
+        for desired in core_options_programme_records():
+            current = self._get({"PK": desired["PK"], "SK": desired["SK"]})
+            if current is not None:
+                if _from_storage(current) != desired:
+                    raise ProgrammeSeedConflict("Core programme publication conflicts with an existing record")
+                continue
+            operations.append({"operation": "Put", "TableName": self.table_name, "Item": desired,
+                               "ConditionExpression": "attribute_not_exists(PK)"})
+        created = len(operations)
+        if expected_version != CORE_OPTIONS_VERSION_ID:
+            for current in pointers:
+                desired = _from_storage(current)
+                desired.update(active_version_id=CORE_OPTIONS_VERSION_ID, updated_at=utc_iso(self._now()))
+                operations.append({"operation": "Put", "TableName": self.table_name, "Item": desired,
+                                   "ConditionExpression": "active_version_id = :version",
+                                   "ExpressionAttributeValues": {":version": expected_version}})
+        if not dry_run and operations:
+            try:
+                self._transact_write(operations)
+            except Exception as err:
+                if _is_conditional_failure(err):
+                    raise ProgrammeSeedConflict("Programme changed during publication; reload and retry") from err
+                raise
+        return {"version_id": CORE_OPTIONS_VERSION_ID, "created": 0 if dry_run else created,
+                "would_create": created, "activate": expected_version != CORE_OPTIONS_VERSION_ID,
+                "dry_run": dry_run}
 
     # ---- Identity and profiles -------------------------------------------------
 

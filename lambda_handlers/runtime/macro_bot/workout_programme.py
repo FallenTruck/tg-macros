@@ -13,6 +13,7 @@ from typing import Any, Iterable, Mapping
 
 PROGRAMME_ID = "javaanfitness"
 INITIAL_VERSION_ID = "2026-09-01-v1"
+CORE_OPTIONS_VERSION_ID = "2026-09-06-v2"
 PROGRAMME_PK = f"PROGRAM#{PROGRAMME_ID}"
 
 WEEKDAYS = {"TUESDAY", "FRIDAY", "SUNDAY"}
@@ -60,6 +61,11 @@ EXERCISE_CATALOGUE: tuple[dict[str, Any], ...] = (
     _exercise("incline_dumbbell_chest_press", "Incline Dumbbell Chest Press", ["incline db press", "incline chest press"], "dumbbell", ["chest"], "loaded_reps", loading_convention="per_dumbbell_kg"),
     _exercise("dumbbell_shoulder_press", "Dumbbell Shoulder Press", ["db shoulder press", "shoulder press"], "dumbbell", ["shoulders"], "loaded_reps", loading_convention="per_dumbbell_kg"),
     _exercise("triceps_rope_pressdown", "Triceps Rope Pressdown", ["rope pressdown", "triceps pushdown"], "cable", ["triceps"], "loaded_reps", loading_convention="cable_load_kg"),
+)
+
+CORE_EXERCISE_ADDITIONS: tuple[dict[str, Any], ...] = (
+    _exercise("standing_ab_crunch_machine", "Standing Ab Crunch Machine", ["standing crunch", "standing ab crunch"], "ab_crunch_machine", ["core"], "optional_load_reps", loading_convention="equipment_load_kg"),
+    _exercise("russian_twist", "Russian Twists", ["russian twist", "russian twists"], "bodyweight_or_free_weight", ["core"], "optional_load_reps", loading_convention="equipment_load_kg"),
 )
 
 
@@ -228,6 +234,33 @@ def initial_programme_records() -> list[dict[str, Any]]:
         records.append({"PK": PROGRAMME_PK, "SK": f"VERSION#{INITIAL_VERSION_ID}#DAY#{day_code}#META", "entity_type": "workout_programme_day", "programme_id": PROGRAMME_ID, "version_id": INITIAL_VERSION_ID, **day_meta})
         for prescription in day["prescriptions"]:
             records.append({"PK": PROGRAMME_PK, "SK": f"VERSION#{INITIAL_VERSION_ID}#DAY#{day_code}#PRESCRIPTION#{int(prescription['sequence']):03d}", "programme_id": PROGRAMME_ID, "version_id": INITIAL_VERSION_ID, **deepcopy(prescription)})
+    return records
+
+
+def core_options_programme_records() -> list[dict[str, Any]]:
+    """New immutable version; initial prescriptions and saved sessions stay intact."""
+    records = []
+    for original in initial_programme_records():
+        if original.get("version_id") != INITIAL_VERSION_ID:
+            continue
+        item = deepcopy(original)
+        item["SK"] = item["SK"].replace(INITIAL_VERSION_ID, CORE_OPTIONS_VERSION_ID)
+        item["version_id"] = CORE_OPTIONS_VERSION_ID
+        if item["entity_type"] == "workout_programme_version":
+            item.update(created_at="2026-09-06T00:00:00Z", effective_at="2026-09-06T00:00:00Z",
+                        notes="Adds standing ab crunch machine and Russian twists as core choices; optional weight defaults to bodyweight.")
+        if item.get("prescription_group") == "core":
+            for exercise in CORE_EXERCISE_ADDITIONS:
+                exercise_id = exercise["exercise_id"]
+                item["allowed_exercise_ids"].append(exercise_id)
+                item["option_targets"][exercise_id] = _option_target(
+                    exercise_id, execution_type="optional_load_reps",
+                    set_min=item["set_min"], set_max=item["set_max"], rep_min=8, rep_max=12,
+                    target_note="Count each side as one rep." if exercise_id == "russian_twist" else "Omit weight for bodyweight.",
+                )
+        records.append(item)
+    records.extend({"PK": "CATALOG#EXERCISES", "SK": f"EXERCISE#{item['exercise_id']}", **deepcopy(item)}
+                   for item in CORE_EXERCISE_ADDITIONS)
     return records
 
 

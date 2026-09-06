@@ -769,7 +769,11 @@ function renderSetForm(execution, ordinal) {
   } else {
     const load = execution.loading_convention === "per_dumbbell_kg" ? "Weight per dumbbell (kg)" : "Load (kg)";
     fields = execution.execution_type === "loaded_reps" ? `<label>${load}<input name="load_value" type="number" min="0" step="0.25" inputmode="decimal" required${inputValue(previousSet?.load_value)}></label>` : "";
-    fields += `<label>Reps<input name="reps" type="number" min="1" inputmode="numeric" required${inputValue(previousSet?.reps)}></label>`;
+    if (execution.execution_type === "optional_load_reps") {
+      fields = `<label>Weight (kg) <span class="optional-label">optional</span><input name="load_value" type="number" min="0" step="0.25" inputmode="decimal" placeholder="Bodyweight"${inputValue(previousSet?.load_value)}></label>`;
+    }
+    const repsLabel = execution.performed_exercise_id === "russian_twist" ? "Reps (each side counts as 1)" : "Reps";
+    fields += `<label>${repsLabel}<input name="reps" type="number" min="1" inputmode="numeric" required${inputValue(previousSet?.reps)}></label>`;
   }
   if (execution.execution_type !== "timed") {
     fields += `<label>RIR <span class="optional-label">optional</span><input name="rir" type="number" min="0" max="10" step="0.5" inputmode="decimal"${inputValue(previousSet?.rir)}></label>`;
@@ -805,6 +809,7 @@ function formatSetResult(set) {
   if (set.status === "skipped") return set.skip_reason || "Skipped";
   if (set.duration_seconds != null) return `${set.duration_seconds}s`;
   if (set.side_reps) return `${set.load_value ?? ""} kg · L ${set.side_reps.left} / R ${set.side_reps.right}`;
+  if (set.load_scope === "bodyweight") return `Bodyweight × ${set.reps} reps`;
   if (set.load_value != null) return `${set.load_value} kg × ${set.reps}`;
   return `${set.reps} reps`;
 }

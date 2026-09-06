@@ -293,6 +293,23 @@ class LiveJavaanFitnessE2ETests(unittest.TestCase):
             browser.close()
             playwright.stop()
 
+    def test_live_core_options(self):
+        from scripts.reset_e2e_account import reset_e2e_account
+        from e2e.core_workout_flow import exercise_core_choices
+        reset_e2e_account(table=self.table, repository=self.repository)
+        playwright, browser = self._new_browser()
+        try:
+            context = browser.new_context(viewport={"width": 390, "height": 844})
+            page = self._open_page(context)
+            self._login(page)
+            exercise_core_choices(page, "artifacts/e2e/core-options-live")
+            page.get_by_test_id("logout").click()
+            page.get_by_test_id("browser-login-form").wait_for(state="visible")
+        finally:
+            browser.close()
+            playwright.stop()
+            reset_e2e_account(table=self.table, repository=self.repository)
+
     def test_live_profile_settings(self):
         from scripts.reset_e2e_account import reset_e2e_account
         from e2e.profile_flow import exercise_profile_settings

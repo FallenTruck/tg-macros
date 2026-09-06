@@ -127,6 +127,15 @@ secret-handling rules.
 
 ## Capture screenshots
 
+Core-option changes have an offline browser check:
+`.venv/bin/python -m unittest e2e.test_core_workout_browser`. After deploying and
+publishing the new programme, run the existing live harness with
+`RUN_JAVAAN_E2E=1` and select
+`e2e.test_live_app.LiveJavaanFitnessE2ETests.test_live_core_options`. It resets
+the marked account before and after, selects both additions, saves bodyweight
+and weighted sets, verifies reload persistence and captures only authenticated
+exercise cards in `artifacts/e2e/core-options-live/`.
+
 ```bash
 make e2e-screenshots
 ```

@@ -262,6 +262,15 @@ included in the Lambda runtime bundle.
 
 ## Backend-only and frontend-only releases
 
+For the core-options release, deploy the backend and frontend before publishing
+the new programme. Discover `FitnessDataTableName` from this stack's outputs,
+then run `scripts/seed_workout_programme.py --core-options --dry-run` with that
+`--table-name`, profile and region. Inspect the result, then repeat without
+`--dry-run`. Publication is atomic and idempotent; it never overwrites the
+initial version or user-owned sessions. Use `--core-options` for subsequent
+checks of this version, since the original seed intentionally refuses to change
+an already advanced active pointer.
+
 For backend-only changes, run `sync-runtime`, lint, the Colima-backed SAM build,
 and `sam deploy`. Do not invalidate CloudFront unless static files changed.
 

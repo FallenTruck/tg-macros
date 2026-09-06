@@ -16,3 +16,4 @@ storage_state*.json
 *.webm
 
 artifacts/nutrition/
+artifacts/workout-backfill/

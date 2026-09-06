@@ -9,6 +9,7 @@ single-active-session and optimistic-concurrency rules.
 from __future__ import annotations
 
 import uuid
+import math
 from datetime import date
 from typing import Any, Mapping, Optional
 
@@ -453,6 +454,15 @@ class WorkoutExecutionRepository:
         elif execution_type == "bodyweight_reps":
             if payload.get("load_value") is not None:
                 raise InvalidWorkoutInput("bodyweight sets must not include load_value")
+            result["reps"] = self._as_int(payload.get("reps"), "reps")
+        elif execution_type == "optional_load_reps":
+            load = payload.get("load_value")
+            if load is not None:
+                load = self._as_float(load, "load_value", minimum=0)
+                if not math.isfinite(load):
+                    raise InvalidWorkoutInput("load_value must be finite")
+            result["load_value"] = load if load else None
+            result["load_scope"] = "equipment" if load else "bodyweight"
             result["reps"] = self._as_int(payload.get("reps"), "reps")
         elif execution_type == "side_aware_reps":
             sides = payload.get("side_reps")

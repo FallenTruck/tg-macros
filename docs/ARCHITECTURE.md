@@ -192,6 +192,14 @@ main-app link or a newly generated command link) to resume. Links created before
 the timeout change retain their original expiry; retained user data is not
 migrated.
 
+Programme `2026-09-06-v2` adds Standing Ab Crunch Machine and Russian Twists to
+every core slot. Both use `optional_load_reps`: omitted/zero external weight is
+stored as `load_value=null`, `load_scope=bodyweight`; positive weight is stored
+in kg. Russian twist reps count each side as one. Existing prescribed exercises
+retain their required-load behavior. Publication adds a version and catalogue
+records, then atomically changes the shared active pointers. Previous versions
+and saved execution snapshots remain intact.
+
 ## Data ownership and retention
 
 `FitnessDataTable` is an on-demand, encrypted DynamoDB table with point-in-time

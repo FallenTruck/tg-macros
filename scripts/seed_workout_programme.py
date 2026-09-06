@@ -21,6 +21,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--region", default=os.getenv("AWS_REGION", "ap-southeast-1"))
     parser.add_argument("--profile", default=os.getenv("AWS_PROFILE"))
     parser.add_argument("--dry-run", action="store_true", help="reconcile without writing records")
+    parser.add_argument("--core-options", action="store_true", help="publish the core-options version after the initial seed")
     return parser
 
 
@@ -33,11 +34,13 @@ def main(argv: list[str] | None = None) -> int:
         session_kwargs["profile_name"] = args.profile
     session = boto3.Session(**session_kwargs)
     table = session.resource("dynamodb").Table(args.table_name)
-    report = DynamoNutritionRepository(
+    repository = DynamoNutritionRepository(
         table,
         table_name=args.table_name,
         client=session.client("dynamodb"),
-    ).seed_workout_programme(dry_run=args.dry_run)
+    )
+    report = (repository.publish_core_options_programme(dry_run=args.dry_run) if args.core_options
+              else repository.seed_workout_programme(dry_run=args.dry_run))
     print(json.dumps({"table": args.table_name, "dry_run": args.dry_run, **report}, sort_keys=True))
     return 0
 
