@@ -1,6 +1,6 @@
 import copy
 import unittest
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from unittest.mock import patch
 
 from fastapi.testclient import TestClient
@@ -391,6 +391,59 @@ class WorkoutExecutionTests(unittest.TestCase):
             self.assertEqual(active.json()["session"]["session"]["session_id"], session_id)
             denied = client.post("/api/workout/sessions", json={"day_code": "PULL"})
             self.assertEqual(denied.status_code, 401)
+
+    def test_workout_link_allows_set_saves_for_one_hour_and_expiry_preserves_resume(self):
+        opened_at = self.now
+        self.service.create_mini_app_launch(
+            "workout-timeout-test", identity=self.identity(), chat_id=-10099,
+            chat_type="group", message_id=77, launch_type="workout",
+        )
+        headers = {"X-Telegram-Init-Data": _init_data(
+            auth_date=int(opened_at.timestamp()),
+            init_fields={"start_param": "workout-timeout-test", "chat_type": "group"},
+        )}
+        client = TestClient(api.app)
+        with patch.object(api, "_service", return_value=self.service), patch.object(
+            api, "bot_token_from_environment", return_value="test-token"
+        ), patch("macro_bot.serverless_auth.time.time", side_effect=lambda: self.now.timestamp()):
+            started = client.post("/api/workout/sessions", json={"day_code": "PULL"}, headers=headers)
+            self.assertEqual(started.status_code, 200)
+            session = started.json()["session"]
+            session_id = self.session_id(session)
+            execution_id = session["executions"][0]["execution_id"]
+            set_url = f"/api/workout/sessions/{session_id}/executions/{execution_id}/sets"
+            for ordinal, elapsed in enumerate((16 * 60, 45 * 60, 60 * 60 - 1), start=1):
+                self.now = opened_at + timedelta(seconds=elapsed)
+                saved = client.put(
+                    f"{set_url}/{ordinal}", headers=headers,
+                    json={"load_value": 37.5, "reps": 9, "execution_expected_revision": ordinal},
+                )
+                self.assertEqual(saved.status_code, 200, saved.text)
+                self.assertEqual(len(saved.json()["executions"][0]["sets"]), ordinal)
+
+            self.now = opened_at + timedelta(hours=1)
+            before = copy.deepcopy(self.table.items)
+            expired = client.put(
+                f"{set_url}/1", headers=headers,
+                json={"load_value": 40, "reps": 10, "expected_revision": 1, "execution_expected_revision": 4},
+            )
+            self.assertEqual(expired.status_code, 401)
+            self.assertEqual(expired.json()["detail"], "Mini App launch token is invalid or expired")
+            self.assertEqual(self.table.items, before)
+
+            # Reopening the shared link supplies fresh Telegram authentication;
+            # the durable workout and all sets survive the old link's expiry.
+            fresh_headers = {"X-Telegram-Init-Data": _init_data(auth_date=int(self.now.timestamp()))}
+            resumed = client.get("/api/workout/sessions/active", headers=fresh_headers)
+            self.assertEqual(resumed.status_code, 200)
+            self.assertEqual(self.session_id(resumed.json()["session"]), session_id)
+            self.assertEqual(len(resumed.json()["session"]["executions"][0]["sets"]), 3)
+            updated = client.put(
+                f"{set_url}/1", headers=fresh_headers,
+                json={"load_value": 40, "reps": 10, "expected_revision": 1, "execution_expected_revision": 4},
+            )
+            self.assertEqual(updated.status_code, 200)
+            self.assertEqual(updated.json()["executions"][0]["sets"][0]["reps"], 10)
 
     def test_authenticated_api_submits_completed_workout_and_clears_active_session(self):
         service = self.service

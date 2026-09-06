@@ -46,7 +46,9 @@ ACTION_TTL_SECONDS = 60 * 60
 # Keep finalized action records around long enough for the expiry sweep to
 # observe them before DynamoDB's asynchronous TTL deletion.
 ACTION_RECORD_RETENTION_SECONDS = 7 * 24 * 60 * 60
-MINI_APP_LAUNCH_TTL_SECONDS = 15 * 60
+# Every authenticated request rechecks the launch context, including set saves.
+# Match the one-hour Telegram authentication window so workouts are not cut short.
+MINI_APP_LAUNCH_TTL_SECONDS = 60 * 60
 BROWSER_SESSION_TTL_SECONDS = 30 * 24 * 60 * 60
 
 

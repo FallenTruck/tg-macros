@@ -183,6 +183,15 @@ to the active view and scrolls to that session. The active pointer remains in
 DynamoDB, so reopening the Workout tab can find an unfinished session. Viewing
 the programme does not cancel the session.
 
+Generated Mini App links remain valid for 60 minutes from link creation. The
+API rechecks this launch deadline on every request, including workout set saves.
+Telegram signed authentication separately allows one hour from its `auth_date`.
+These are fixed windows, not idle timers. Expiry never deletes the active workout
+or its saved sets: reopen with fresh Telegram authentication (using the shared
+main-app link or a newly generated command link) to resume. Links created before
+the timeout change retain their original expiry; retained user data is not
+migrated.
+
 ## Data ownership and retention
 
 `FitnessDataTable` is an on-demand, encrypted DynamoDB table with point-in-time
