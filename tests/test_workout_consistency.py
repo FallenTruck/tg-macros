@@ -16,7 +16,7 @@ class WorkoutConsistencyTests(unittest.TestCase):
         self.user = self.fixture.identity()
 
     def race_before_write(self, concurrent_action, action):
-        original = self.repo._transact_write
+        original = self.repo.store.transact_write
         fired = False
 
         def intercept(operations):
@@ -26,7 +26,7 @@ class WorkoutConsistencyTests(unittest.TestCase):
                 concurrent_action()
             return original(operations)
 
-        with patch.object(self.repo, '_transact_write', side_effect=intercept):
+        with patch.object(self.repo.store, 'transact_write', side_effect=intercept):
             with self.assertRaises(WorkoutConflict):
                 action()
         self.assertTrue(fired)
@@ -84,7 +84,7 @@ class WorkoutConsistencyTests(unittest.TestCase):
         self.assertTrue(all(e['status'] == 'skipped' for e in result['executions']))
 
     def test_start_uses_one_programme_snapshot_during_publication(self):
-        original = self.repo.get_workout_programme
+        original = self.fixture.service.programme_repository.get_programme
         initial = original()
 
         def publish_after_read(*args, **kwargs):
@@ -92,7 +92,7 @@ class WorkoutConsistencyTests(unittest.TestCase):
             self.repo.publish_core_options_programme()
             return snapshot
 
-        with patch.object(self.repo, 'get_workout_programme', side_effect=publish_after_read) as reads:
+        with patch.object(self.workouts, 'programme_reader', side_effect=publish_after_read) as reads:
             result = self.fixture.start(day='PUSH')
         self.assertEqual(reads.call_count, 1)
         self.assertEqual(result['session']['programme_version_id'], initial['version']['version_id'])
@@ -105,8 +105,22 @@ class WorkoutConsistencyTests(unittest.TestCase):
         session = self.fixture.start()
         sid = session['session']['session_id']
         eid = session['executions'][0]['execution_id']
-        with patch.object(self.repo, '_query', wraps=self.repo._query) as queries:
+        with patch.object(self.repo.store, 'query', wraps=self.repo.store.query) as queries:
             result = self.workouts.put_set(self.user, sid, eid, 1, {'load_value': 20, 'reps': 8})
         self.assertTrue(queries.call_args_list)
         self.assertTrue(all(call.kwargs.get('ConsistentRead') is True for call in queries.call_args_list))
         self.assertEqual(result['executions'][0]['sets'][0]['reps'], 8)
+
+    def test_nested_set_response_preserves_legacy_metadata(self):
+        session = self.fixture.start()
+        sid = session['session']['session_id']
+        eid = session['executions'][0]['execution_id']
+        result = self.workouts.put_set(self.user, sid, eid, 1, {'load_value': 20.5, 'reps': 8})
+        expected = next(item for item in self.fixture.table.items.values()
+                        if item.get('entity_type') == 'workout_set')
+        saved = result['executions'][0]['sets'][0]
+        self.assertEqual({key: saved[key] for key in ('PK', 'SK', 'entity_type')},
+                         {key: expected[key] for key in ('PK', 'SK', 'entity_type')})
+        self.assertEqual(saved['load_value'], 20.5)
+        for record in (result['session'], result['executions'][0]):
+            self.assertFalse({'PK', 'SK', 'entity_type'} & record.keys())

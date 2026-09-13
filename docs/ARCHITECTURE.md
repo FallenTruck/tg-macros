@@ -167,8 +167,61 @@ requires its stored internal `user_id` to match the session mapping.
 ### Workout flow
 
 `macro_bot/workout_programme.py` contains the shared immutable programme
-definitions. `macro_bot/workout_execution.py` owns independent, durable user
-executions. The API exposes programme reads and session operations including:
+definitions. `serverless_service.build_service` is the Lambda composition root:
+it constructs sibling programme/workout repositories and the workout service,
+then injects them into the retained `NutritionService` API compatibility facade.
+Existing HTTP and worker callers keep their facade methods; that facade does
+not imply nutrition ownership of workout or programme persistence.
+
+```text
+API / Lambda → build_service → existing API facade
+
+NutritionService → DynamoNutritionRepository
+WorkoutService   → WorkoutRepository
+                 → ProgrammeReader (ProgrammeRepository.get_programme)
+
+DynamoNutritionRepository ─┐
+DynamoWorkoutRepository   ─┼→ DynamoDBStore → DynamoDB
+DynamoProgrammeRepository ─┘
+```
+
+`macro_bot/workout_service.py` owns lifecycle and completion rules, input and
+expected-revision validation, operation orchestration, programme snapshots and
+logical response assembly. It uses application records without interpreting
+storage keys. Nested set responses retain their historical `PK`, `SK` and
+`entity_type` fields for API compatibility; only the adapter constructs them.
+`macro_bot/workout_repository.py` defines the small persistence contract;
+`macro_bot/dynamo_workout_repository.py` implements workout key mapping, strong
+reads, opaque history cursors, conditional writes and transactions. History
+summaries and duration calculation belong to the service; history records and
+locators retain their existing keys. `macro_bot/workout_types.py` holds shared
+lifecycle constants and public errors; `workout_execution.py` retains error
+imports for existing callers.
+
+`macro_bot/programme_repository.py` defines programme reads, day lookup,
+initial seeding and the existing core-options publication contract.
+`macro_bot/dynamo_programme_repository.py` owns its implementation, including
+`PROGRAM#javaanfitness` metadata, active pointers, version/day/prescription
+records and `CATALOG#EXERCISES`. Seeding remains additive, idempotent and
+conflict-safe. Publication atomically adds records and conditionally advances
+both `META` and `ACTIVE`; historical version reads still select the requested
+version. Programme query consistency settings and physical records are unchanged.
+
+`macro_bot/dynamo_store.py` supplies shared serialization, consistent gets,
+conditional puts, paginated queries and transaction submission. All three
+repositories use it; workout and programme never call private nutrition helpers.
+`data_errors.py` holds the shared error base so programme conflicts preserve
+their public inheritance without depending on nutrition.
+
+Four public programme methods on `DynamoNutritionRepository` remain as marked
+compatibility delegators for existing local callers and test fixtures; they
+contain no programme implementation. The seed/publish CLI uses the programme
+repository directly. Direct `NutritionService(...)` construction retains default
+composition for local callers, while allowing independent programme and workout
+dependency injection. Profile-local date resolution remains in the facade;
+programme ownership does not. No `ProgrammeService` is introduced.
+
+The API exposes programme reads and session operations including:
 
 - `POST /api/workout/sessions`
 - `GET /api/workout/sessions/active`
@@ -189,6 +242,8 @@ also checks skipped exercise revisions, so a concurrent reset cannot invalidate
 its completion decision. Execution/set queries use strongly consistent reads;
 these prevent eventual-read lag but are not a multi-record snapshot. Session
 creation derives the selected day from the single loaded programme version.
+Substitution and historical session reconstruction explicitly read the version
+stored in that session, so later publication cannot switch its programme context.
 
 The Mini App permits one workout mutation at a time and preserves other set
 forms' entered values across renders, keyed by session, exercise execution,

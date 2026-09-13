@@ -29,7 +29,10 @@ from .serverless_data import (
     utc_iso,
 )
 from .workout_programme import PROGRAMME_ID
-from .workout_execution import WorkoutExecutionRepository
+from .workout_service import WorkoutService
+from .dynamo_workout_repository import DynamoWorkoutRepository
+from .dynamo_programme_repository import DynamoProgrammeRepository
+from .programme_repository import ProgrammeRepository
 
 logger = logging.getLogger(__name__)
 
@@ -89,7 +92,7 @@ class _DynamoMealLogRepository:
 
 
 class NutritionService:
-    """Use-case boundary independent of Telegram, HTTP, and file storage."""
+    """Nutrition use cases and the retained API compatibility facade for workouts."""
 
     def __init__(
         self,
@@ -97,6 +100,8 @@ class NutritionService:
         *,
         catalog_store: Optional[ReadOnlyFoodCatalogStore] = None,
         now_fn: Any = None,
+        programme_repository: Optional[ProgrammeRepository] = None,
+        workout_service: Optional[WorkoutService] = None,
     ):
         self.repository = repository
         self.catalog_store = catalog_store or ReadOnlyFoodCatalogStore()
@@ -107,7 +112,15 @@ class NutritionService:
             self.catalog_store,
             recommendation_client=ServerlessRecommendationClient(),
         )
-        self.workout_execution = WorkoutExecutionRepository(repository)
+        # Direct construction remains supported for local callers and fixtures.
+        self.programme_repository = programme_repository if programme_repository is not None else DynamoProgrammeRepository(
+            repository.store, now_fn=lambda: repository.now_fn(),
+        )
+        self.workout_execution = workout_service if workout_service is not None else WorkoutService(
+            DynamoWorkoutRepository(repository.store),
+            self.programme_repository.get_programme,
+            now_fn=lambda: repository.now_fn(),
+        )
 
     def _now(self) -> datetime:
         value = self._now_fn()
@@ -242,13 +255,13 @@ class NutritionService:
     # ---- Read-only shared workout programme -------------------------------
 
     def workout_programme(self, version_id: Optional[str] = None) -> dict[str, Any]:
-        programme = self.repository.get_workout_programme(version_id=version_id)
+        programme = self.programme_repository.get_programme(version_id=version_id)
         if programme is None:
             raise KeyError(f"Workout programme is unavailable: {PROGRAMME_ID}")
         return programme
 
     def workout_programme_day(self, day_code: str, version_id: Optional[str] = None) -> dict[str, Any]:
-        day = self.repository.get_workout_programme_day(day_code, version_id=version_id)
+        day = self.programme_repository.get_programme_day(day_code, version_id=version_id)
         if day is None:
             raise KeyError(f"Workout programme day is unavailable: {day_code}")
         return day
@@ -530,3 +543,13 @@ def _estimate_payload(estimate: Any) -> dict[str, Any]:
     from .serverless_data import _estimate_payload as serialize_estimate
 
     return serialize_estimate(estimate)
+
+
+def build_service(repository: DynamoNutritionRepository) -> NutritionService:
+    """Lambda composition root: compose sibling repositories and retain the API facade."""
+    programmes = DynamoProgrammeRepository(repository.store, now_fn=lambda: repository.now_fn())
+    workouts = WorkoutService(
+        DynamoWorkoutRepository(repository.store), programmes.get_programme,
+        now_fn=lambda: repository.now_fn(),
+    )
+    return NutritionService(repository, programme_repository=programmes, workout_service=workouts)

@@ -29,7 +29,7 @@ sync-runtime:
 	cp lambda_handlers/lab_worker.py "$(RUNTIME_DIR)/lab_worker.py"
 	cp lambda_handlers/api.py "$(RUNTIME_DIR)/api.py"
 	cp lambda_handlers/webhook.py lambda_handlers/webhook_runtime/webhook.py
-	cp macro_bot/__init__.py macro_bot/nutrition_lab.py macro_bot/direct_estimator.py macro_bot/formatting.py macro_bot/models.py macro_bot/profile_targets.py macro_bot/recommendations.py macro_bot/recommendation_scenarios.py macro_bot/serverless_auth.py macro_bot/serverless_data.py macro_bot/serverless_service.py macro_bot/workout_execution.py macro_bot/workout_programme.py "$(RUNTIME_DIR)/macro_bot/"
+	cp macro_bot/__init__.py macro_bot/nutrition_lab.py macro_bot/direct_estimator.py macro_bot/formatting.py macro_bot/models.py macro_bot/profile_targets.py macro_bot/recommendations.py macro_bot/recommendation_scenarios.py macro_bot/serverless_auth.py macro_bot/serverless_data.py macro_bot/serverless_service.py macro_bot/workout_execution.py macro_bot/dynamo_store.py macro_bot/workout_types.py macro_bot/workout_repository.py macro_bot/dynamo_workout_repository.py macro_bot/workout_service.py macro_bot/workout_programme.py macro_bot/programme_repository.py macro_bot/dynamo_programme_repository.py macro_bot/data_errors.py "$(RUNTIME_DIR)/macro_bot/"
 	cp food_catalog.json "$(RUNTIME_DIR)/food_catalog.json"
 
 nutrition-eval:

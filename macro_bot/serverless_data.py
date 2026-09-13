@@ -13,12 +13,17 @@ import secrets
 import uuid
 from dataclasses import dataclass
 from datetime import date, datetime, time, timedelta, timezone
-from decimal import Decimal
 from typing import Any, Iterable, List, Mapping, Optional, Sequence
 from zoneinfo import ZoneInfo
 
 from boto3.dynamodb.conditions import Attr, Key
-from boto3.dynamodb.types import TypeSerializer
+
+from .dynamo_store import (
+    DynamoDBStore,
+    to_storage as _to_storage,
+    from_storage as _from_storage,
+    is_conditional_failure as _is_conditional_failure,
+)
 
 from .serverless_auth import browser_session_token_hash, normalize_web_username, web_credential_key
 from .models import (
@@ -29,16 +34,9 @@ from .models import (
     PendingMealAction,
     UserProfile,
 )
-from .workout_programme import (
-    CORE_OPTIONS_VERSION_ID,
-    INITIAL_VERSION_ID,
-    PROGRAMME_ID,
-    PROGRAMME_PK,
-    day_response,
-    core_options_programme_records,
-    initial_programme_records,
-    programme_response,
-)
+from .data_errors import DataError
+from .programme_repository import ProgrammeSeedConflict  # Compatibility error import.
+from .dynamo_programme_repository import DynamoProgrammeRepository
 
 logger = logging.getLogger(__name__)
 
@@ -54,10 +52,6 @@ MINI_APP_LAUNCH_TTL_SECONDS = 60 * 60
 BROWSER_SESSION_TTL_SECONDS = 30 * 24 * 60 * 60
 
 
-class DataError(RuntimeError):
-    """Base class for durable application data errors."""
-
-
 class IdentityCreationRace(DataError):
     pass
 
@@ -71,12 +65,6 @@ class ActionExpired(DataError):
 
 
 class ActionFinalized(DataError):
-    pass
-
-
-class ProgrammeSeedConflict(DataError):
-    """Raised when a deterministic programme key contains different data."""
-
     pass
 
 
@@ -179,42 +167,6 @@ def local_day_utc_bounds(target_date: date, timezone_name: str = DEFAULT_TIMEZON
     return utc_iso(start_local), utc_iso(end_local)
 
 
-def _to_storage(value: Any) -> Any:
-    """Convert JSON-like values to values accepted by the DynamoDB resource."""
-
-    if isinstance(value, float):
-        return Decimal(str(value))
-    if isinstance(value, int) and not isinstance(value, bool):
-        return value
-    if isinstance(value, Mapping):
-        return {str(key): _to_storage(item) for key, item in value.items()}
-    if isinstance(value, (list, tuple)):
-        return [_to_storage(item) for item in value]
-    return value
-
-
-def _from_storage(value: Any) -> Any:
-    if isinstance(value, Decimal):
-        return float(value) if value % 1 else int(value)
-    if isinstance(value, Mapping):
-        return {str(key): _from_storage(item) for key, item in value.items()}
-    if isinstance(value, list):
-        return [_from_storage(item) for item in value]
-    return value
-
-
-def _is_conditional_failure(error: Exception) -> bool:
-    response = getattr(error, "response", None)
-    if isinstance(response, Mapping):
-        code = response.get("Error", {}).get("Code")
-        if code == "ConditionalCheckFailedException":
-            return True
-    return type(error).__name__ in {
-        "ConditionalCheckFailedException",
-        "TransactionCanceledException",
-    }
-
-
 def _estimate_payload(estimate: MealEstimate) -> dict[str, Any]:
     payload: dict[str, Any] = {
         "meal_name": estimate.meal_name,
@@ -315,6 +267,7 @@ class DynamoNutritionRepository:
                 self.client = boto3.client("dynamodb")
             else:
                 self.client = resource_client
+        self.store = DynamoDBStore(self.table, self.table_name, self.client)
         self.now_fn = now_fn
         self.identity_id_factory = identity_id_factory
         self.token_factory = token_factory
@@ -327,166 +280,27 @@ class DynamoNutritionRepository:
         return value.astimezone(timezone.utc)
 
     def _get(self, key: Mapping[str, str]) -> Optional[dict[str, Any]]:
-        try:
-            result = self.table.get_item(Key=dict(key), ConsistentRead=True)
-        except TypeError:
-            result = self.table.get_item(Key=dict(key))
-        item = result.get("Item") if isinstance(result, Mapping) else None
-        return dict(item) if item else None
+        return self.store.get_item(key)
 
     def _query(self, key_expression: Any, **kwargs: Any) -> list[dict[str, Any]]:
-        query_kwargs = dict(kwargs)
-        results: list[dict[str, Any]] = []
-        requested_limit = query_kwargs.get("Limit")
-        while True:
-            result = self.table.query(KeyConditionExpression=key_expression, **query_kwargs)
-            if isinstance(result, Mapping):
-                results.extend(dict(item) for item in result.get("Items", []))
-                last_key = result.get("LastEvaluatedKey")
-            else:
-                last_key = None
-            if requested_limit is not None and len(results) >= int(requested_limit):
-                return results[: int(requested_limit)]
-            if not last_key:
-                break
-            query_kwargs["ExclusiveStartKey"] = last_key
-            if requested_limit is not None:
-                query_kwargs["Limit"] = max(1, int(requested_limit) - len(results))
-        return results
+        return self.store.query(key_expression, **kwargs)
 
     def _transact_write(self, operations: Sequence[dict[str, Any]]) -> None:
-        low_level_operations: list[dict[str, Any]] = []
-        serializer = TypeSerializer()
-        for operation in operations:
-            operation_name = str(operation.get("operation", "Put"))
-            # TableName belongs on every low-level transaction operation, not
-            # on the TransactWriteItems request itself.
-            converted = {key: value for key, value in operation.items() if key != "operation"}
-            if "Item" in converted:
-                converted["Item"] = {
-                    key: serializer.serialize(_to_storage(value))
-                    for key, value in converted["Item"].items()
-                }
-            if "Key" in converted:
-                converted["Key"] = {
-                    key: serializer.serialize(_to_storage(value))
-                    for key, value in converted["Key"].items()
-                }
-            if "ExpressionAttributeValues" in converted:
-                converted["ExpressionAttributeValues"] = {
-                    key: serializer.serialize(_to_storage(value))
-                    for key, value in converted["ExpressionAttributeValues"].items()
-                }
-            low_level_operations.append({operation_name: converted})
+        self.store.transact_write(operations)
 
-        if self.client is not None and hasattr(self.client, "transact_write_items"):
-            self.client.transact_write_items(TransactItems=low_level_operations)
-            return
-        if hasattr(self.table, "transact_write_items"):
-            self.table.transact_write_items(TransactItems=low_level_operations)
-            return
-        raise RuntimeError("DynamoDB transaction client is not configured")
-
-    # ---- Shared workout programme --------------------------------------------
-
-    def _programme_records(self) -> list[dict[str, Any]]:
-        records = self._query(Key("PK").eq(PROGRAMME_PK))
-        records.extend(self._query(Key("PK").eq("CATALOG#EXERCISES")))
-        return [_from_storage(item) for item in records]
-
+    # Compatibility shims for existing scripts/test fixtures. Programme ownership
+    # and all persistence implementation live in DynamoProgrammeRepository.
     def get_workout_programme(self, version_id: Optional[str] = None) -> Optional[dict[str, Any]]:
-        """Return a shared programme assembled from immutable records."""
-
-        records = self._programme_records()
-        metadata = next((item for item in records if item.get("entity_type") == "workout_programme"), None)
-        if metadata is None:
-            return None
-        selected_version = str(version_id or metadata.get("active_version_id") or "").strip()
-        if not selected_version:
-            return None
-        selected = [
-            item
-            for item in records
-            if item.get("entity_type") in {"workout_programme", "workout_programme_version", "workout_programme_day", "programme_prescription", "exercise"}
-            and (item.get("entity_type") in {"workout_programme", "exercise"} or item.get("version_id") == selected_version)
-        ]
-        result = programme_response(selected, version_id=selected_version)
-        return result if result.get("version") else None
+        return DynamoProgrammeRepository(self.store).get_programme(version_id=version_id)
 
     def get_workout_programme_day(self, day_code: str, version_id: Optional[str] = None) -> Optional[dict[str, Any]]:
-        programme = self.get_workout_programme(version_id=version_id)
-        if programme is None:
-            return None
-        return day_response(programme, day_code)
+        return DynamoProgrammeRepository(self.store).get_programme_day(day_code, version_id=version_id)
 
     def seed_workout_programme(self, *, dry_run: bool = False) -> dict[str, int]:
-        """Reconcile the deterministic initial programme without overwriting."""
-
-        records = initial_programme_records()
-        existing: dict[tuple[str, str], Optional[dict[str, Any]]] = {}
-        for desired in records:
-            key = (str(desired["PK"]), str(desired["SK"]))
-            current = self._get({"PK": key[0], "SK": key[1]})
-            existing[key] = _from_storage(current) if current else None
-            if current is not None and _from_storage(current) != desired:
-                raise ProgrammeSeedConflict(f"conflicting programme record: {key[0]} / {key[1]}")
-        if dry_run:
-            return {"created": 0, "existing": sum(value is not None for value in existing.values()), "would_create": sum(value is None for value in existing.values()), "records": len(records)}
-        created = 0
-        already_existing = 0
-        for desired in records:
-            key = (str(desired["PK"]), str(desired["SK"]))
-            if existing[key] is not None:
-                already_existing += 1
-                continue
-            try:
-                self.table.put_item(Item=_to_storage(desired), ConditionExpression="attribute_not_exists(PK)")
-                created += 1
-            except Exception as err:
-                if not _is_conditional_failure(err):
-                    raise
-                current = self._get({"PK": key[0], "SK": key[1]})
-                if current is None or _from_storage(current) != desired:
-                    raise ProgrammeSeedConflict(f"conflicting programme record after concurrent write: {key[0]} / {key[1]}") from err
-                already_existing += 1
-        return {"created": created, "existing": already_existing, "would_create": 0, "records": len(records)}
+        return DynamoProgrammeRepository(self.store).seed_workout_programme(dry_run=dry_run)
 
     def publish_core_options_programme(self, *, dry_run: bool = False) -> dict[str, Any]:
-        """Atomically publish additive core choices without rewriting old versions."""
-        pointers = [self._get({"PK": PROGRAMME_PK, "SK": sk}) for sk in ("META", "ACTIVE")]
-        if any(not item for item in pointers):
-            raise ProgrammeSeedConflict("Seed the initial programme before publishing core choices")
-        versions = {str(item.get("active_version_id")) for item in pointers}
-        if len(versions) != 1 or not versions <= {INITIAL_VERSION_ID, CORE_OPTIONS_VERSION_ID}:
-            raise ProgrammeSeedConflict("Unexpected active programme version")
-        expected_version = next(iter(versions))
-        operations = []
-        for desired in core_options_programme_records():
-            current = self._get({"PK": desired["PK"], "SK": desired["SK"]})
-            if current is not None:
-                if _from_storage(current) != desired:
-                    raise ProgrammeSeedConflict("Core programme publication conflicts with an existing record")
-                continue
-            operations.append({"operation": "Put", "TableName": self.table_name, "Item": desired,
-                               "ConditionExpression": "attribute_not_exists(PK)"})
-        created = len(operations)
-        if expected_version != CORE_OPTIONS_VERSION_ID:
-            for current in pointers:
-                desired = _from_storage(current)
-                desired.update(active_version_id=CORE_OPTIONS_VERSION_ID, updated_at=utc_iso(self._now()))
-                operations.append({"operation": "Put", "TableName": self.table_name, "Item": desired,
-                                   "ConditionExpression": "active_version_id = :version",
-                                   "ExpressionAttributeValues": {":version": expected_version}})
-        if not dry_run and operations:
-            try:
-                self._transact_write(operations)
-            except Exception as err:
-                if _is_conditional_failure(err):
-                    raise ProgrammeSeedConflict("Programme changed during publication; reload and retry") from err
-                raise
-        return {"version_id": CORE_OPTIONS_VERSION_ID, "created": 0 if dry_run else created,
-                "would_create": created, "activate": expected_version != CORE_OPTIONS_VERSION_ID,
-                "dry_run": dry_run}
+        return DynamoProgrammeRepository(self.store, now_fn=self.now_fn).publish_core_options_programme(dry_run=dry_run)
 
     # ---- Identity and profiles -------------------------------------------------
 

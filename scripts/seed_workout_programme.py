@@ -12,7 +12,8 @@ from typing import Any
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from macro_bot.serverless_data import DynamoNutritionRepository
+from macro_bot.dynamo_programme_repository import DynamoProgrammeRepository
+from macro_bot.dynamo_store import DynamoDBStore
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -34,10 +35,8 @@ def main(argv: list[str] | None = None) -> int:
         session_kwargs["profile_name"] = args.profile
     session = boto3.Session(**session_kwargs)
     table = session.resource("dynamodb").Table(args.table_name)
-    repository = DynamoNutritionRepository(
-        table,
-        table_name=args.table_name,
-        client=session.client("dynamodb"),
+    repository = DynamoProgrammeRepository(
+        DynamoDBStore(table, args.table_name, session.client("dynamodb")),
     )
     report = (repository.publish_core_options_programme(dry_run=args.dry_run) if args.core_options
               else repository.seed_workout_programme(dry_run=args.dry_run))

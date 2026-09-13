@@ -60,7 +60,7 @@ class WorkoutHistoryTests(unittest.TestCase):
         first = self.close(True)
         second = self.close()
         self.service.start_workout(self.identity, "PULL")
-        with patch.object(self.repo, "_query", side_effect=AssertionError("List cannot load children")):
+        with patch.object(self.repo.store, "query", side_effect=AssertionError("List cannot load children")):
             page = self.service.list_workout_history(self.identity, limit=1)
             self.assertEqual([s["session_id"] for s in page["sessions"]], [second])
             self.assertEqual(page["sessions"][0]["status"], "cancelled")

@@ -35,7 +35,7 @@ from macro_bot.serverless_data import (
     ActionNotFound,
     DynamoNutritionRepository,
 )
-from macro_bot.serverless_service import InvalidUserInput, NutritionService
+from macro_bot.serverless_service import InvalidUserInput, NutritionService, build_service
 
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
@@ -375,7 +375,7 @@ def _repository() -> DynamoNutritionRepository:
 
 
 def _service() -> NutritionService:
-    return NutritionService(_repository())
+    return build_service(_repository())
 
 
 def _bot():

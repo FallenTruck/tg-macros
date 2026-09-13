@@ -12,8 +12,8 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from boto3.dynamodb.conditions import Attr, Key
-from macro_bot.serverless_data import _is_conditional_failure
-from macro_bot.workout_execution import WorkoutExecutionRepository
+from macro_bot.dynamo_store import is_conditional_failure as _is_conditional_failure
+from macro_bot.dynamo_workout_repository import DynamoWorkoutRepository
 
 
 def backfill(table, *, apply=False, user_id=None):
@@ -35,9 +35,9 @@ def backfill(table, *, apply=False, user_id=None):
             if not session:
                 continue
             report["sessions"] += 1
-            items = [WorkoutExecutionRepository.locator_item(session)]
+            items = [DynamoWorkoutRepository.locator_item(session)]
             if session.get("status") in {"completed", "cancelled"}:
-                items.append(WorkoutExecutionRepository.history_item(session))
+                items.append(DynamoWorkoutRepository.history_item(session))
             for item in items:
                 key = {k: item[k] for k in ("PK", "SK")}
                 existing = table.get_item(Key=key, ConsistentRead=True).get("Item")

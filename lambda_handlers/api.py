@@ -23,7 +23,7 @@ from macro_bot.serverless_auth import (
     verify_web_password,
 )
 from macro_bot.serverless_data import BROWSER_SESSION_TTL_SECONDS, DynamoNutritionRepository
-from macro_bot.serverless_service import InvalidUserInput, NutritionService
+from macro_bot.serverless_service import InvalidUserInput, NutritionService, build_service
 from macro_bot.workout_execution import InvalidWorkoutInput, WorkoutConflict, WorkoutNotFound
 
 logger = logging.getLogger(__name__)
@@ -98,7 +98,7 @@ def _service() -> NutritionService:
     table = boto3.resource("dynamodb").Table(table_name)
     # Transactions use the low-level client because the resource-bound client
     # applies its own serializer to AttributeValue maps.
-    return NutritionService(
+    return build_service(
         DynamoNutritionRepository(
             table,
             table_name=table_name,

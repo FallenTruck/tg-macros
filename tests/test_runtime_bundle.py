@@ -20,7 +20,15 @@ class RuntimeBundleTests(unittest.TestCase):
             "serverless_data.py",
             "serverless_service.py",
             "workout_execution.py",
+            "dynamo_store.py",
+            "workout_types.py",
+            "workout_repository.py",
+            "dynamo_workout_repository.py",
+            "workout_service.py",
             "workout_programme.py",
+            "programme_repository.py",
+            "dynamo_programme_repository.py",
+            "data_errors.py",
         ]
         for name in module_names:
             self.assertEqual(
