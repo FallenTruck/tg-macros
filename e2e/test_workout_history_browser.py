@@ -52,13 +52,13 @@ class WorkoutHistoryBrowserTests(unittest.TestCase):
                     fixture.service.workout_execution.session_id_factory = lambda i=index: f"history-{i:03d}"
                     payload = fixture.service.start_workout(fixture.identity, "PULL")
                     sid = payload["session"]["session_id"]
-                    if index == 0:
-                        for ex in payload["executions"]:
-                            fixture.service.skip_workout_exercise(fixture.identity, sid, ex["execution_id"], {"expected_revision": 1})
-                        fixture.service.complete_workout(fixture.identity, sid, {"expected_revision": 1})
-                    else:
-                        fixture.service.put_workout_set(fixture.identity, sid, payload["executions"][0]["execution_id"], 1, {"load_value": 40, "reps": 8, "rir": 2})
-                        fixture.service.cancel_workout(fixture.identity, sid, {"expected_revision": 1})
+                    fixture.service.put_workout_set(fixture.identity, sid, payload["executions"][0]["execution_id"], 1, {"load_value": 40, "reps": 8, "rir": 2})
+                    for ex in payload["executions"]:
+                        fixture.service.skip_workout_exercise(fixture.identity, sid, ex["execution_id"], {"expected_revision": 2 if ex == payload["executions"][0] else 1})
+                    fixture.service.complete_workout(fixture.identity, sid, {"expected_revision": 1})
+                    fixture.service.workout_execution.session_id_factory = lambda i=index: f"cancelled-{i:03d}"
+                    cancelled = fixture.service.start_workout(fixture.identity, "PULL")
+                    fixture.service.cancel_workout(fixture.identity, cancelled["session"]["session_id"], {"expected_revision": 1})
                 # Keep a live workout too: its completion dock must be hidden in history.
                 fixture.service.workout_execution.session_id_factory = lambda: "still-active"
                 fixture.service.start_workout(fixture.identity, "PULL")
@@ -66,7 +66,7 @@ class WorkoutHistoryBrowserTests(unittest.TestCase):
                 page.locator('[data-route="workout"]').click()
                 page.locator('#open-workout-history').click()
                 expect(history.locator('.workout-history-row')).to_have_count(20)
-                expect(history).to_contain_text("Cancelled")
+                expect(history).not_to_contain_text("Cancelled")
                 history.get_by_role('button', name='Load More').click()
                 expect(history.locator('.workout-history-row')).to_have_count(21)
                 expect(history).to_contain_text("Completed")

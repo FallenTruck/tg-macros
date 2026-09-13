@@ -193,7 +193,10 @@ storage keys. Nested set responses retain their historical `PK`, `SK` and
 `macro_bot/workout_repository.py` defines the small persistence contract;
 `macro_bot/dynamo_workout_repository.py` implements workout key mapping, strong
 reads, opaque history cursors, conditional writes and transactions. History
-summaries and duration calculation belong to the service; history records and
+lists show completed sessions only. The adapter advances through user-scoped
+summary pages past cancelled entries until the requested visible page is full or
+history is exhausted; cancelled records remain stored. Summary assembly and
+duration calculation belong to the service; history records and
 locators retain their existing keys. `macro_bot/workout_types.py` holds shared
 lifecycle constants and public errors; `workout_execution.py` retains error
 imports for existing callers.

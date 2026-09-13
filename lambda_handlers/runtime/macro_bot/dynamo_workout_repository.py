@@ -176,9 +176,19 @@ class DynamoWorkoutRepository:
                 kwargs["ExclusiveStartKey"] = {"PK": identity.pk, "SK": decoded["sk"]}
             except (ValueError, TypeError, KeyError, binascii.Error):
                 raise InvalidWorkoutInput("Invalid workout history cursor") from None
-        page = self.store.query_page(**kwargs)
-        last = page.get("LastEvaluatedKey")
-        return {"sessions": [self._record(item) for item in page.get("Items", [])],
+        sessions = []
+        while True:
+            # Limit evaluated summaries to the remaining slots so no completed
+            # session is discarded when advancing the DynamoDB cursor.
+            kwargs["Limit"] = int(limit) - len(sessions)
+            page = self.store.query_page(**kwargs)
+            sessions.extend(self._record(item) for item in page.get("Items", [])
+                            if item.get("status") == SESSION_STATUS_COMPLETED)
+            last = page.get("LastEvaluatedKey")
+            if not last or len(sessions) >= int(limit):
+                break
+            kwargs["ExclusiveStartKey"] = last
+        return {"sessions": sessions,
                 "next_cursor": self._encode_cursor(last["PK"], last["SK"]) if last else None}
 
     def create_session(self, identity: WorkoutIdentity, session: Record, executions: list[dict[str, Any]]) -> None:

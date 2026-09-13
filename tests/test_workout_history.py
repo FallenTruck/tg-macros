@@ -58,12 +58,14 @@ class WorkoutHistoryTests(unittest.TestCase):
     def test_order_pagination_ownership_and_no_child_reads(self):
         self.table.put_item(Item={"PK": self.identity.pk, "SK": "MEAL#unrelated", "entity_type": "meal"})
         first = self.close(True)
-        second = self.close()
+        self.close()  # Cancelled entries between visible pages.
+        second = self.close(True)
+        self.close()  # Newest entry must not consume a visible slot.
         self.service.start_workout(self.identity, "PULL")
         with patch.object(self.repo.store, "query", side_effect=AssertionError("List cannot load children")):
             page = self.service.list_workout_history(self.identity, limit=1)
             self.assertEqual([s["session_id"] for s in page["sessions"]], [second])
-            self.assertEqual(page["sessions"][0]["status"], "cancelled")
+            self.assertEqual(page["sessions"][0]["status"], "completed")
             self.assertEqual(page["sessions"][0]["duration_minutes"], 0)
             rest = self.service.list_workout_history(self.identity, limit=1, cursor=page["next_cursor"])
             self.assertEqual(rest["sessions"][0]["session_id"], first)
@@ -76,12 +78,14 @@ class WorkoutHistoryTests(unittest.TestCase):
     def test_start_timestamp_precedes_session_id_and_duration(self):
         from datetime import timedelta
         self.service.workout_execution.session_id_factory = lambda: "z-old"
-        self.close()
+        self.close(True)
         self.fixture.now += timedelta(days=1)
         self.service.workout_execution.session_id_factory = lambda: "a-new"
         payload = self.service.start_workout(self.identity, "PULL")
         self.fixture.now += timedelta(minutes=71)
-        self.service.cancel_workout(self.identity, payload["session"]["session_id"], {"expected_revision": 1})
+        for ex in payload["executions"]:
+            self.service.skip_workout_exercise(self.identity, payload["session"]["session_id"], ex["execution_id"], {"expected_revision": 1})
+        self.service.complete_workout(self.identity, payload["session"]["session_id"], {"expected_revision": 1})
         page = self.service.list_workout_history(self.identity, limit=50)
         self.assertEqual([s["session_id"] for s in page["sessions"]], ["a-new", "z-old"])
         self.assertEqual(page["sessions"][0]["duration_minutes"], 71)
@@ -158,8 +162,28 @@ class WorkoutHistoryTests(unittest.TestCase):
             self.assertEqual(item, self.table.items[key])
         self.assertEqual(backfill(self.table, apply=True, user_id=self.identity.user_id)["missing"], 0)
 
+    def test_only_cancelled_history_is_empty_without_mutating_records(self):
+        for _ in range(3):
+            self.close()
+        before = copy.deepcopy(self.table.items)
+        self.assertEqual(self.service.list_workout_history(self.identity, limit=1),
+                         {"sessions": [], "next_cursor": None})
+        self.assertEqual(self.table.items, before)
+
+    def test_cancelled_entries_do_not_shorten_visible_pages(self):
+        expected = []
+        for _ in range(5):
+            expected.insert(0, self.close(True))
+            self.close()
+        page = self.service.list_workout_history(self.identity, limit=3)
+        self.assertEqual([s["session_id"] for s in page["sessions"]], expected[:3])
+        rest = self.service.list_workout_history(self.identity, limit=3, cursor=page["next_cursor"])
+        self.assertEqual([s["session_id"] for s in rest["sessions"]], expected[3:])
+        self.assertIsNone(rest["next_cursor"])
+
     def test_api_history_and_detail_errors(self):
-        sid = self.close()
+        sid = self.close(True)
+        self.close()
         self.close(True)
         client = TestClient(api.app)
         with patch.object(api, "_service", return_value=self.service), patch.object(api, "_auth_identity", return_value=self.identity):

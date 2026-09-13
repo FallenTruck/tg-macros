@@ -2012,7 +2012,7 @@ function renderWorkoutHistory() {
         <strong>${escapeHtml(session.workout_name || session.programme_day_id)}</strong>
         <span>${escapeHtml(historySessionLabel(session))}</span>
       </button>`).join("")}
-    ${!detail && !history.loading && !history.error && !history.sessions.length ? '<p class="summary-empty">No workout history yet. Completed and cancelled workouts will appear here.</p>' : ""}
+    ${!detail && !history.loading && !history.error && !history.sessions.length ? '<p class="summary-empty">No workout history yet. Completed workouts will appear here.</p>' : ""}
     ${!detail && history.next_cursor ? `<button class="ghost-button" data-history-action="more" ${history.loading ? "disabled" : ""}>Load More</button>` : ""}
   </section>`;
 }
