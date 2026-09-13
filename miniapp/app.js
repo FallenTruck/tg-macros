@@ -696,10 +696,89 @@ function workoutDayAction(day) {
   return `<button class="primary workout-start-button" type="button" data-testid="workout-day-start-${escapeHtml(day.day_code)}" data-action="${action}" data-workout-day="${escapeHtml(day.day_code)}"${disabled}>${escapeHtml(label)}</button>`;
 }
 
+let workoutMutationPending = false;
+let workoutNeedsRefresh = false;
+
+function workoutDraftKey(form) {
+  return [form.dataset.sessionId, form.dataset.executionId, form.dataset.ordinal, form.dataset.exerciseId].join("|");
+}
+
+function captureWorkoutDrafts() {
+  return new Map(Array.from(workoutSessionEl?.querySelectorAll("[data-set-form]") || [],
+    (form) => [workoutDraftKey(form), Array.from(new FormData(form).entries())]));
+}
+
+function restoreWorkoutDrafts(drafts) {
+  for (const form of workoutSessionEl.querySelectorAll("[data-set-form]")) {
+    for (const [name, value] of drafts.get(workoutDraftKey(form)) || []) {
+      const field = form.elements.namedItem(name);
+      if (field) field.value = value;
+    }
+  }
+}
+
+function setWorkoutBusy(busy) {
+  for (const container of [workoutProgrammeEl, workoutSessionEl, workoutCompletionDockEl]) {
+    for (const control of container?.querySelectorAll("button, select") || []) {
+      if (busy) {
+        if (control.dataset.workoutWasDisabled === undefined) {
+          control.dataset.workoutWasDisabled = String(control.disabled);
+        }
+        control.disabled = true;
+      } else if (control.dataset.workoutWasDisabled !== undefined) {
+        control.disabled = control.dataset.workoutWasDisabled === "true";
+        delete control.dataset.workoutWasDisabled;
+      }
+    }
+  }
+}
+
+async function reconcileWorkout() {
+  const response = await apiFetch("/api/workout/sessions/active");
+  state.activeWorkout = response.session || null;
+  workoutNeedsRefresh = false;
+  setWorkoutMode(state.activeWorkout ? WORKOUT_ACTIVE_MODE : WORKOUT_PROGRAMME_MODE);
+}
+
+async function workoutMutation(url, options) {
+  if (workoutMutationPending) throw new Error("A workout save is already in progress.");
+  workoutMutationPending = true;
+  setWorkoutBusy(true);
+  try {
+    if (workoutNeedsRefresh) {
+      // The caller's payload was built from unverified state. Refresh only;
+      // require a new action built from the updated form and revision.
+      try {
+        await reconcileWorkout();
+      } catch (_refreshError) {
+        throw new Error("Could not verify the workout. Reconnect and try again to refresh before saving.");
+      }
+      throw new Error("Workout refreshed. Review the saved entries before trying again.");
+    }
+    try {
+      return await apiFetch(url, options);
+    } catch (error) {
+      // A lost response may follow a committed write. Read before allowing any
+      // retry, so the same ordinal is never blindly submitted as a new set.
+      workoutNeedsRefresh = true;
+      try {
+        await reconcileWorkout();
+      } catch (_refreshError) {
+        throw new Error("Could not verify the workout. Your entered values are still here. Reconnect and try again to refresh before saving.");
+      }
+      throw new Error(`${error.message || "Workout update failed."} Workout refreshed; review the saved entries before retrying.`);
+    }
+  } finally {
+    workoutMutationPending = false;
+    setWorkoutBusy(false);
+  }
+}
+
 function renderWorkoutSession() {
   if (!workoutSessionEl) {
     return;
   }
+  const drafts = captureWorkoutDrafts();
   const active = state.activeWorkout;
   workoutSessionEl.hidden = !active?.session || state.workoutMode !== WORKOUT_ACTIVE_MODE;
   pageShell?.classList.toggle("workout-active", Boolean(active?.session));
@@ -728,6 +807,8 @@ function renderWorkoutSession() {
       </div>
     </section>
   `;
+  restoreWorkoutDrafts(drafts);
+  if (workoutMutationPending) setWorkoutBusy(true);
 }
 
 function workoutCompletionSummary(active) {
@@ -871,7 +952,7 @@ function renderSetForm(execution, ordinal) {
     `${prefix} data-execution-revision="${execution.revision}"`,
   );
   const repeatButton = previousSet ? `<button class="ghost-button workout-repeat-button" type="button" data-testid="workout-repeat-set" data-action="repeat-previous-set">Repeat previous set</button>` : "";
-  return `<form class="workout-set-form" data-testid="workout-set-form-${escapeHtml(execution.execution_id)}-${ordinal}" data-set-form ${prefix} data-execution-revision="${execution.revision}"><div class="workout-set-fields">${fields}</div>${repeatButton}<div class="workout-set-actions"><button class="primary" data-testid="workout-save-set" type="submit">Save Set ${ordinal}</button>${skipControls}</div></form>`;
+  return `<form class="workout-set-form" data-testid="workout-set-form-${escapeHtml(execution.execution_id)}-${ordinal}" data-set-form ${prefix} data-execution-revision="${execution.revision}" data-exercise-id="${escapeHtml(execution.performed_exercise_id)}"><div class="workout-set-fields">${fields}</div>${repeatButton}<div class="workout-set-actions"><button class="primary" data-testid="workout-save-set" type="submit">Save Set ${ordinal}</button>${skipControls}</div></form>`;
 }
 
 function repeatPreviousSet(formElement, execution) {
@@ -904,11 +985,11 @@ function formatSetResult(set) {
 
 async function handleWorkoutClick(event) {
   const button = event.target.closest("[data-action]");
-  if (!button || button.disabled) return;
+  if (!button || button.disabled || workoutMutationPending) return;
   const action = button.dataset.action;
   try {
     if (action === "start-workout" || action === "resume-workout") {
-      const response = await apiFetch("/api/workout/sessions", {method: "POST", body: JSON.stringify({day_code: button.dataset.workoutDay})});
+      const response = await workoutMutation("/api/workout/sessions", {method: "POST", body: JSON.stringify({day_code: button.dataset.workoutDay})});
       state.activeWorkout = response.session;
       setWorkoutMode(WORKOUT_ACTIVE_MODE, {scrollToSession: true});
       setStatus("Workout saved. Log each set as you complete it.", "success");
@@ -932,28 +1013,27 @@ async function handleWorkoutClick(event) {
     }
     if (action === "skip-exercise") {
       const reasonSelect = button.closest(".workout-skip-controls")?.querySelector("[data-skip-reason-select]");
-      const response = await apiFetch(`/api/workout/sessions/${encodeURIComponent(button.dataset.sessionId)}/executions/${encodeURIComponent(button.dataset.executionId)}/skip`, {method: "POST", body: JSON.stringify({skip_reason: reasonSelect?.value || "intentionally_skipped", expected_revision: Number(button.dataset.revision)})});
+      const response = await workoutMutation(`/api/workout/sessions/${encodeURIComponent(button.dataset.sessionId)}/executions/${encodeURIComponent(button.dataset.executionId)}/skip`, {method: "POST", body: JSON.stringify({skip_reason: reasonSelect?.value || "intentionally_skipped", expected_revision: Number(button.dataset.revision)})});
       state.activeWorkout = response;
       renderWorkoutSession();
       return;
     }
     if (action === "skip-set") {
       const reasonSelect = button.closest(".workout-skip-controls")?.querySelector("[data-skip-reason-select]");
-      const response = await apiFetch(`/api/workout/sessions/${encodeURIComponent(button.dataset.sessionId)}/executions/${encodeURIComponent(button.dataset.executionId)}/sets/${button.dataset.ordinal}/skip`, {method: "POST", body: JSON.stringify({skip_reason: reasonSelect?.value || "intentionally_skipped", execution_expected_revision: Number(button.dataset.executionRevision)})});
+      const response = await workoutMutation(`/api/workout/sessions/${encodeURIComponent(button.dataset.sessionId)}/executions/${encodeURIComponent(button.dataset.executionId)}/sets/${button.dataset.ordinal}/skip`, {method: "POST", body: JSON.stringify({skip_reason: reasonSelect?.value || "intentionally_skipped", execution_expected_revision: Number(button.dataset.executionRevision)})});
       state.activeWorkout = response;
       renderWorkoutSession();
       return;
     }
     if (action === "cancel-workout") {
-      const response = await apiFetch(`/api/workout/sessions/${encodeURIComponent(state.activeWorkout.session.session_id)}/cancel`, {method: "POST", body: JSON.stringify({expected_revision: state.activeWorkout.session.revision})});
+      const response = await workoutMutation(`/api/workout/sessions/${encodeURIComponent(state.activeWorkout.session.session_id)}/cancel`, {method: "POST", body: JSON.stringify({expected_revision: state.activeWorkout.session.revision})});
       state.activeWorkout = null;
       setWorkoutMode(WORKOUT_PROGRAMME_MODE);
       setStatus("Workout cancelled. Your saved history remains intact.", "info");
       return response;
     }
     if (action === "submit-workout") {
-      button.disabled = true;
-      const response = await apiFetch(`/api/workout/sessions/${encodeURIComponent(state.activeWorkout.session.session_id)}/complete`, {method: "POST", body: JSON.stringify({expected_revision: state.activeWorkout.session.revision})});
+      const response = await workoutMutation(`/api/workout/sessions/${encodeURIComponent(state.activeWorkout.session.session_id)}/complete`, {method: "POST", body: JSON.stringify({expected_revision: state.activeWorkout.session.revision})});
       state.activeWorkout = null;
       setWorkoutMode(WORKOUT_PROGRAMME_MODE);
       setStatus("Workout submitted. Your saved history has been updated.", "success");
@@ -966,7 +1046,7 @@ async function handleWorkoutClick(event) {
 
 async function handleWorkoutChange(event) {
   const select = event.target.closest('[data-action="choose-exercise"]');
-  if (!select) return;
+  if (!select || workoutMutationPending) return;
   const execution = state.activeWorkout?.executions.find((item) => item.execution_id === select.dataset.executionId);
   const allowedExerciseIds = new Set((execution?.allowed_exercise_ids || []).map((id) => String(id)));
   if (!execution || !allowedExerciseIds.has(String(select.value))) {
@@ -975,7 +1055,7 @@ async function handleWorkoutChange(event) {
     return;
   }
   try {
-    const response = await apiFetch(`/api/workout/sessions/${encodeURIComponent(select.dataset.sessionId)}/executions/${encodeURIComponent(select.dataset.executionId)}`, {method: "PUT", body: JSON.stringify({performed_exercise_id: select.value, expected_revision: Number((state.activeWorkout.executions.find((item) => item.execution_id === select.dataset.executionId) || {}).revision)})});
+    const response = await workoutMutation(`/api/workout/sessions/${encodeURIComponent(select.dataset.sessionId)}/executions/${encodeURIComponent(select.dataset.executionId)}`, {method: "PUT", body: JSON.stringify({performed_exercise_id: select.value, expected_revision: Number((state.activeWorkout.executions.find((item) => item.execution_id === select.dataset.executionId) || {}).revision)})});
     state.activeWorkout = response;
     renderWorkoutSession();
   } catch (error) {
@@ -987,6 +1067,7 @@ async function handleWorkoutSubmit(event) {
   const formElement = event.target.closest("[data-set-form]");
   if (!formElement) return;
   event.preventDefault();
+  if (workoutMutationPending) return;
   const execution = state.activeWorkout?.executions.find((item) => item.execution_id === formElement.dataset.executionId);
   if (!execution) return;
   const values = new FormData(formElement);
@@ -1011,7 +1092,7 @@ async function handleWorkoutSubmit(event) {
   const existing = (execution.sets || []).find((item) => Number(item.set_ordinal) === Number(formElement.dataset.ordinal));
   if (existing) payload.expected_revision = Number(existing.revision);
   try {
-    const response = await apiFetch(`/api/workout/sessions/${encodeURIComponent(formElement.dataset.sessionId)}/executions/${encodeURIComponent(formElement.dataset.executionId)}/sets/${formElement.dataset.ordinal}`, {method: "PUT", body: JSON.stringify(payload)});
+    const response = await workoutMutation(`/api/workout/sessions/${encodeURIComponent(formElement.dataset.sessionId)}/executions/${encodeURIComponent(formElement.dataset.executionId)}/sets/${formElement.dataset.ordinal}`, {method: "PUT", body: JSON.stringify(payload)});
     state.activeWorkout = response;
     renderWorkoutSession();
   } catch (error) {

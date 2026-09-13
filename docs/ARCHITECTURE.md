@@ -183,6 +183,20 @@ to the active view and scrolls to that session. The active pointer remains in
 DynamoDB, so reopening the Workout tab can find an unfinished session. Viewing
 the programme does not cancel the session.
 
+Every exercise/set mutation conditionally checks the parent session's status
+and revision inside the same DynamoDB transaction as its writes. Completion
+also checks skipped exercise revisions, so a concurrent reset cannot invalidate
+its completion decision. Execution/set queries use strongly consistent reads;
+these prevent eventual-read lag but are not a multi-record snapshot. Session
+creation derives the selected day from the single loaded programme version.
+
+The Mini App permits one workout mutation at a time and preserves other set
+forms' entered values across renders, keyed by session, exercise execution,
+set ordinal, and selected exercise. Failed or uncertain writes trigger an active
+session refresh before another mutation is allowed. If that refresh also fails,
+the next action refreshes only; the user reviews the recovered state before
+saving again. Drafts remain in the current page, not durable offline storage.
+
 Generated Mini App links remain valid for 60 minutes from link creation. The
 API rechecks this launch deadline on every request, including workout set saves.
 Telegram signed authentication separately allows one hour from its `auth_date`.

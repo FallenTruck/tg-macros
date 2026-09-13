@@ -15,6 +15,8 @@ from typing import Any, Mapping, Optional
 
 from boto3.dynamodb.conditions import Key
 
+from .workout_programme import day_response
+
 from .serverless_data import (
     ServerlessIdentity,
     _from_storage,
@@ -120,7 +122,8 @@ class WorkoutExecutionRepository:
     def _execution_item(self, identity: ServerlessIdentity, session_item: Mapping[str, Any], execution_id: str) -> Optional[dict[str, Any]]:
         prefix = f"{session_item['SK']}#EXEC#"
         records = self.repository._query(
-            Key("PK").eq(self._user_pk(identity)) & Key("SK").begins_with(prefix)
+            Key("PK").eq(self._user_pk(identity)) & Key("SK").begins_with(prefix),
+            ConsistentRead=True,
         )
         for item in records:
             if item.get("entity_type") == "workout_execution" and str(item.get("execution_id")) == str(execution_id):
@@ -132,6 +135,7 @@ class WorkoutExecutionRepository:
         records = self.repository._query(
             Key("PK").eq(self._user_pk(identity)) & Key("SK").begins_with(prefix),
             ScanIndexForward=True,
+            ConsistentRead=True,
         )
         return sorted(
             (item for item in records if item.get("entity_type") == "workout_set"),
@@ -143,6 +147,7 @@ class WorkoutExecutionRepository:
         executions = self.repository._query(
             Key("PK").eq(self._user_pk(identity)) & Key("SK").begins_with(f"{session_item['SK']}#EXEC#"),
             ScanIndexForward=True,
+            ConsistentRead=True,
         )
         execution_payloads = []
         for raw_execution in sorted(
@@ -176,6 +181,25 @@ class WorkoutExecutionRepository:
             raise WorkoutNotFound("Workout execution was not found")
         return session, execution
 
+    def _session_guard(self, session: Mapping[str, Any]) -> dict[str, Any]:
+        return {
+            "operation": "ConditionCheck",
+            "TableName": self.repository.table_name,
+            "Key": {"PK": session["PK"], "SK": session["SK"]},
+            "ConditionExpression": "#status = :in_progress AND revision = :expected",
+            "ExpressionAttributeNames": {"#status": "status"},
+            "ExpressionAttributeValues": {
+                ":in_progress": SESSION_STATUS_IN_PROGRESS,
+                ":expected": int(session["revision"]),
+            },
+        }
+
+    def _write_execution(self, session: Mapping[str, Any], **update: Any) -> None:
+        self.repository._transact_write([
+            self._session_guard(session),
+            {"operation": "Update", "TableName": self.repository.table_name, **update},
+        ])
+
     def _now(self) -> str:
         return utc_iso(self.repository._now())
 
@@ -208,7 +232,7 @@ class WorkoutExecutionRepository:
         if programme is None:
             raise WorkoutNotFound("Shared workout programme is unavailable")
         requested_day = str(day_code or "").strip().upper()
-        day_result = self.repository.get_workout_programme_day(requested_day)
+        day_result = day_response(programme, requested_day)
         if day_result is None:
             raise WorkoutNotFound("Workout programme day was not found")
         day = day_result["day"]
@@ -368,7 +392,8 @@ class WorkoutExecutionRepository:
             ":in_progress": EXECUTION_STATUS_IN_PROGRESS,
         }
         try:
-            self.repository.table.update_item(
+            self._write_execution(
+                session,
                 Key={"PK": session["PK"], "SK": execution["SK"]},
                 UpdateExpression=(
                     "SET performed_exercise_id = :performed, substitution_reason = :reason, "
@@ -407,7 +432,8 @@ class WorkoutExecutionRepository:
 
     def _update_execution_status(self, identity: ServerlessIdentity, session: Mapping[str, Any], execution: Mapping[str, Any], status: str, skip_reason: str, expected: int) -> None:
         try:
-            self.repository.table.update_item(
+            self._write_execution(
+                session,
                 Key={"PK": session["PK"], "SK": execution["SK"]},
                 UpdateExpression="SET #status = :status, skip_reason = :reason, revision = :new_revision, updated_at = :now",
                 ConditionExpression="#status = :current AND revision = :expected",
@@ -536,7 +562,7 @@ class WorkoutExecutionRepository:
             },
         }
         try:
-            self.repository._transact_write([set_operation, execution_operation])
+            self.repository._transact_write([self._session_guard(session), set_operation, execution_operation])
         except Exception as err:
             if _is_conditional_failure(err):
                 raise WorkoutConflict("Workout set changed; reload and retry") from err
@@ -554,6 +580,7 @@ class WorkoutExecutionRepository:
         executions = self.repository._query(
             Key("PK").eq(self._user_pk(identity)) & Key("SK").begins_with(f"{session['SK']}#EXEC#"),
             ScanIndexForward=True,
+            ConsistentRead=True,
         )
         blockers = []
         for execution in sorted(
@@ -590,9 +617,19 @@ class WorkoutExecutionRepository:
             },
         ]
         for execution in executions:
-            if execution.get("entity_type") != "workout_execution" or execution.get("status") == EXECUTION_STATUS_SKIPPED:
+            if execution.get("entity_type") != "workout_execution":
                 continue
             execution_revision = int(execution.get("revision", 0))
+            if execution.get("status") == EXECUTION_STATUS_SKIPPED:
+                operations.append({
+                    "operation": "ConditionCheck",
+                    "TableName": self.repository.table_name,
+                    "Key": {"PK": session["PK"], "SK": execution["SK"]},
+                    "ConditionExpression": "#status = :skipped AND revision = :expected",
+                    "ExpressionAttributeNames": {"#status": "status"},
+                    "ExpressionAttributeValues": {":skipped": EXECUTION_STATUS_SKIPPED, ":expected": execution_revision},
+                })
+                continue
             operations.append(
                 {
                     "operation": "Update",
