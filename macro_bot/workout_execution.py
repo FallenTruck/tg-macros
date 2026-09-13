@@ -8,9 +8,13 @@ single-active-session and optimistic-concurrency rules.
 
 from __future__ import annotations
 
+import base64
+import binascii
+import json
+import re
 import uuid
 import math
-from datetime import date
+from datetime import date, datetime, timezone
 from typing import Any, Mapping, Optional
 
 from boto3.dynamodb.conditions import Key
@@ -113,11 +117,83 @@ class WorkoutExecutionRepository:
             item = self.repository._get({"PK": str(active["session_pk"]), "SK": str(active["session_sk"])})
             if item:
                 return item
-        records = self.repository._query(Key("PK").eq(self._user_pk(identity)))
-        for item in records:
-            if item.get("entity_type") == "workout_session" and str(item.get("session_id")) == str(session_id):
-                return item
-        return None
+        locator = self.repository._get({"PK": identity.pk, "SK": f"WORKOUT_SESSION#{session_id}"})
+        if not locator:
+            return None
+        return self.repository._get({"PK": identity.pk, "SK": locator["session_sk"]})
+
+    @staticmethod
+    def locator_item(session: Mapping[str, Any]) -> dict[str, Any]:
+        return {"PK": session["PK"], "SK": f"WORKOUT_SESSION#{session['session_id']}",
+                "entity_type": "workout_session_locator", "session_sk": session["SK"]}
+
+    @staticmethod
+    def history_item(session: Mapping[str, Any]) -> dict[str, Any]:
+        if session.get("started_at"):
+            started = datetime.fromisoformat(session["started_at"].replace("Z", "+00:00"))
+        else:
+            # Retrospective entries can intentionally omit actual times. Use a
+            # date-only ordering anchor, never expose it as a factual start time.
+            local_date = date.fromisoformat(session["actual_local_date"])
+            started = datetime(local_date.year, local_date.month, local_date.day, tzinfo=timezone.utc)
+        if started.tzinfo is None:
+            raise ValueError("Session start must include a timezone")
+        order = started.astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.%fZ")
+        fields = ("session_id", "programme_day_id", "workout_name", "programme_version_id",
+                  "actual_local_date", "started_at", "completed_at", "status")
+        return {"PK": session["PK"], "SK": f"WORKOUT_HISTORY#{order}#{session['session_id']}",
+                "entity_type": "workout_history", **{key: session.get(key) for key in fields}}
+
+    def _history_put(self, session: Mapping[str, Any], status: str, now: str) -> dict[str, Any]:
+        return {"operation": "Put", "TableName": self.repository.table_name,
+                "Item": self.history_item({**session, "status": status, "completed_at": now}),
+                "ConditionExpression": "attribute_not_exists(PK)"}
+
+    @staticmethod
+    def _summary(item: Mapping[str, Any]) -> dict[str, Any]:
+        result = {k: v for k, v in _from_storage(item).items() if k not in {"PK", "SK", "entity_type"}}
+        try:
+            start = datetime.fromisoformat(result["started_at"].replace("Z", "+00:00"))
+            end = datetime.fromisoformat(result["completed_at"].replace("Z", "+00:00"))
+            seconds = (end - start).total_seconds()
+            if seconds >= 0:
+                result["duration_minutes"] = int(seconds // 60)
+        except (KeyError, TypeError, ValueError, AttributeError):
+            pass
+        return result
+
+    def list_workout_history(self, identity: ServerlessIdentity, *, limit: Any = 20,
+                             cursor: Optional[str] = None) -> dict[str, Any]:
+        if isinstance(limit, bool) or not re.fullmatch(r"[0-9]{1,2}", str(limit)) or not 1 <= int(limit) <= 50:
+            raise InvalidWorkoutInput("limit must be an integer between 1 and 50")
+        kwargs: dict[str, Any] = {
+            "KeyConditionExpression": Key("PK").eq(identity.pk) & Key("SK").begins_with("WORKOUT_HISTORY#"),
+            "ScanIndexForward": False, "ConsistentRead": True, "Limit": int(limit),
+        }
+        if cursor is not None:
+            try:
+                if not isinstance(cursor, str) or len(cursor) > 2048:
+                    raise ValueError()
+                decoded = json.loads(base64.b64decode(cursor, altchars=b"-_", validate=True))
+                if (set(decoded) != {"v", "pk", "sk"} or decoded["v"] != 1 or decoded["pk"] != identity.pk
+                        or not isinstance(decoded["sk"], str)
+                        or not re.fullmatch(r"WORKOUT_HISTORY#[0-9T:.Z-]+#[^#]+", decoded["sk"])):
+                    raise ValueError()
+                datetime.strptime(decoded["sk"].split("#")[1], "%Y-%m-%dT%H:%M:%S.%fZ")
+                if self._encode_cursor(decoded["pk"], decoded["sk"]) != cursor:
+                    raise ValueError()
+                kwargs["ExclusiveStartKey"] = {"PK": identity.pk, "SK": decoded["sk"]}
+            except (ValueError, TypeError, KeyError, binascii.Error):
+                raise InvalidWorkoutInput("Invalid workout history cursor") from None
+        page = self.repository.table.query(**kwargs)
+        last = page.get("LastEvaluatedKey")
+        return {"sessions": [self._summary(item) for item in page.get("Items", [])],
+                "next_cursor": self._encode_cursor(last["PK"], last["SK"]) if last else None}
+
+    @staticmethod
+    def _encode_cursor(pk: str, sk: str) -> str:
+        return base64.urlsafe_b64encode(json.dumps({"v": 1, "pk": pk, "sk": sk},
+                                                  sort_keys=True, separators=(",", ":")).encode()).decode()
 
     def _execution_item(self, identity: ServerlessIdentity, session_item: Mapping[str, Any], execution_id: str) -> Optional[dict[str, Any]]:
         prefix = f"{session_item['SK']}#EXEC#"
@@ -250,6 +326,7 @@ class WorkoutExecutionRepository:
             "programme_version_id": programme["version"].get("version_id"),
             "programme_day_id": requested_day,
             "planned_weekday": day.get("planned_weekday"),
+            "workout_name": day.get("display_name", requested_day),
             "actual_local_date": local_date_text,
             "started_at": now,
             "completed_at": None,
@@ -318,6 +395,8 @@ class WorkoutExecutionRepository:
             {"operation": "Put", "TableName": self.repository.table_name, "Item": session_item, "ConditionExpression": "attribute_not_exists(PK)"},
             {"operation": "Put", "TableName": self.repository.table_name, "Item": pointer, "ConditionExpression": "attribute_not_exists(PK)"},
         ]
+        operations.append({"operation": "Put", "TableName": self.repository.table_name,
+                           "Item": self.locator_item(session_item), "ConditionExpression": "attribute_not_exists(PK)"})
         operations.extend(
             {"operation": "Put", "TableName": self.repository.table_name, "Item": item, "ConditionExpression": "attribute_not_exists(PK)"}
             for item in execution_items
@@ -345,7 +424,15 @@ class WorkoutExecutionRepository:
         return self._payload(identity, session)
 
     def get_session(self, identity: ServerlessIdentity, session_id: str) -> dict[str, Any]:
-        return self._payload(identity, self._require_session(identity, session_id))
+        session = self._require_session(identity, session_id)
+        result = self._payload(identity, session)
+        if session.get("status") != SESSION_STATUS_IN_PROGRESS:
+            programme = self.repository.get_workout_programme(version_id=session.get("programme_version_id")) or {}
+            names = {item["exercise_id"]: item.get("canonical_name", item["exercise_id"]) for item in programme.get("exercises", [])}
+            for execution in result["executions"]:
+                execution["exercise_name"] = names.get(execution["performed_exercise_id"], execution["performed_exercise_id"])
+            result["session"].update(self._summary(self.history_item(session)))
+        return result
 
     @staticmethod
     def _expected_revision(payload: Mapping[str, Any], current: int) -> int:
@@ -616,6 +703,7 @@ class WorkoutExecutionRepository:
                 },
             },
         ]
+        operations.append(self._history_put(session, SESSION_STATUS_COMPLETED, now))
         for execution in executions:
             if execution.get("entity_type") != "workout_execution":
                 continue
@@ -671,6 +759,7 @@ class WorkoutExecutionRepository:
         now = self._now()
         try:
             self.repository._transact_write([
+                self._history_put(session, SESSION_STATUS_CANCELLED, now),
                 {
                     "operation": "Update",
                     "TableName": self.repository.table_name,

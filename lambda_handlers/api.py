@@ -469,6 +469,17 @@ async def get_active_workout_session(
     return _no_store({"session": session})
 
 
+@app.get("/api/workout/history")
+async def get_workout_history(request: Request, limit: str = "20", cursor: Optional[str] = None) -> JSONResponse:
+    service = _service()
+    identity = _auth_identity(request, service)
+    try:
+        result = service.list_workout_history(identity, limit=limit, cursor=cursor)
+    except InvalidWorkoutInput as err:
+        raise _workout_error(err) from err
+    return _no_store(result)
+
+
 @app.get("/api/workout/sessions/{session_id}")
 async def get_workout_session(
     session_id: str,

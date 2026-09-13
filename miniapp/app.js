@@ -42,6 +42,7 @@ const state = {
   hasAuth: false,
   activeView: HOME_VIEW,
   workoutMode: WORKOUT_PROGRAMME_MODE,
+  workoutHistory: {sessions: [], next_cursor: null, loading: false, error: "", detail: null},
   nutritionError: "",
   labAuthorized: null,
 };
@@ -98,6 +99,9 @@ const previewEmpty = document.querySelector("#preview-empty");
 const homeView = document.querySelector("#home-view");
 const profileView = document.querySelector("#profile-view");
 const questionnaireView = document.querySelector("#questionnaire-view");
+const workoutHistoryEl = document.querySelector("#workout-history");
+document.querySelector("#open-workout-history")?.addEventListener("click", () => loadWorkoutHistory());
+workoutHistoryEl?.addEventListener("click", handleHistoryClick);
 const workoutView = document.querySelector("#workout-view");
 const workoutProgrammeEl = document.querySelector("#workout-programme");
 const workoutSessionEl = document.querySelector("#workout-session");
@@ -428,6 +432,8 @@ async function handleBrowserLogout() {
     nutritionDayRequest = null;
     nutritionTodayRequest = null;
     state.preview = null;
+    state.workoutHistory = {sessions: [], next_cursor: null, loading: false, error: "", detail: null};
+    renderWorkoutHistory();
     state.workoutProgramme = null;
     state.activeWorkout = null;
     showBrowserLogin("You have been signed out.");
@@ -453,7 +459,7 @@ async function loadActiveWorkout() {
     const response = await apiFetch("/api/workout/sessions/active");
     state.activeWorkout = response.session || null;
     setWorkoutMode(
-      state.activeWorkout ? WORKOUT_ACTIVE_MODE : WORKOUT_PROGRAMME_MODE,
+      state.workoutMode === "history" ? "history" : state.activeWorkout ? WORKOUT_ACTIVE_MODE : WORKOUT_PROGRAMME_MODE,
       {scrollToSession: Boolean(state.activeWorkout && state.activeView === WORKOUT_VIEW)},
     );
   } catch (error) {
@@ -843,7 +849,7 @@ function renderWorkoutCompletionDock(active) {
     return;
   }
   const summary = workoutCompletionSummary(active);
-  workoutCompletionDockEl.hidden = false;
+  workoutCompletionDockEl.hidden = state.workoutMode === "history";
   workoutCompletionDockEl.innerHTML = `
     <div class="workout-completion-copy">
       <span class="section-label">Workout progress</span>
@@ -867,11 +873,12 @@ function scrollToActiveWorkout() {
 }
 
 function setWorkoutMode(mode, {scrollToSession = false} = {}) {
-  state.workoutMode = mode === WORKOUT_ACTIVE_MODE && state.activeWorkout?.session
+  state.workoutMode = mode === "history" ? "history" : mode === WORKOUT_ACTIVE_MODE && state.activeWorkout?.session
     ? WORKOUT_ACTIVE_MODE
     : WORKOUT_PROGRAMME_MODE;
   renderWorkoutSession();
   renderWorkoutProgramme();
+  renderWorkoutHistory();
   if (scrollToSession && state.workoutMode === WORKOUT_ACTIVE_MODE) {
     const schedule = window.requestAnimationFrame || ((callback) => setTimeout(callback, 0));
     schedule(scrollToActiveWorkout);
@@ -1936,4 +1943,106 @@ function collectNutritionSettings() {
     }
   }
   return payload;
+}
+
+
+async function loadWorkoutHistory(more = false) {
+  if (!state.hasAuth || state.workoutHistory.loading) return;
+  const history = state.workoutHistory;
+  if (!more) { history.sessions = []; history.next_cursor = null; }
+  history.detail = null;
+  history.error = "";
+  history.loading = true;
+  setWorkoutMode("history");
+  try {
+    const query = more && history.next_cursor ? `&cursor=${encodeURIComponent(history.next_cursor)}` : "";
+    const page = await apiFetch(`/api/workout/history?limit=20${query}`);
+    const known = new Set(history.sessions.map((session) => session.session_id));
+    history.sessions.push(...page.sessions.filter((session) => !known.has(session.session_id)));
+    history.next_cursor = page.next_cursor;
+  } catch (error) {
+    history.error = error.message || "Could not load workout history.";
+  } finally {
+    history.loading = false;
+    renderWorkoutHistory();
+  }
+}
+
+async function handleHistoryClick(event) {
+  const button = event.target.closest("[data-history-action]");
+  if (!button || button.disabled) return;
+  const action = button.dataset.historyAction;
+  if (action === "programme") return setWorkoutMode(WORKOUT_PROGRAMME_MODE);
+  if (action === "more") return loadWorkoutHistory(true);
+  if (action === "retry") return loadWorkoutHistory(Boolean(state.workoutHistory.next_cursor));
+  if (action === "back") { state.workoutHistory.detail = null; renderWorkoutHistory(); return; }
+  const history = state.workoutHistory;
+  if (history.loading) return;
+  history.loading = true;
+  history.error = "";
+  renderWorkoutHistory();
+  try {
+    history.detail = await apiFetch(`/api/workout/sessions/${encodeURIComponent(button.dataset.sessionId)}`);
+  } catch (error) {
+    history.error = error.message || "Could not load this workout.";
+  } finally {
+    history.loading = false;
+    renderWorkoutHistory();
+  }
+}
+
+function historySessionLabel(session) {
+  const status = session.status === "completed" ? "Completed" : session.status === "cancelled" ? "Cancelled" : "In progress";
+  const minutes = session.duration_minutes;
+  const duration = minutes == null ? "" : ` · ${Math.floor(minutes / 60) ? `${Math.floor(minutes / 60)}h ` : ""}${minutes % 60}m`;
+  return `${session.actual_local_date || formatIso(session.started_at)} · ${status}${duration}`;
+}
+
+function renderWorkoutHistory() {
+  if (!workoutHistoryEl) return;
+  workoutHistoryEl.hidden = state.workoutMode !== "history";
+  const history = state.workoutHistory;
+  const detail = history.detail;
+  workoutHistoryEl.innerHTML = `<section class="panel workout-session-panel">
+    <div class="panel-head"><h2>Workout History</h2><button class="ghost-button" data-history-action="programme">View programme</button></div>
+    ${history.loading ? '<p role="status">Loading workout history…</p>' : ""}
+    ${history.error ? `<p role="alert">${escapeHtml(history.error)}</p><button class="ghost-button" data-history-action="retry">Retry</button>` : ""}
+    ${detail ? renderHistoricalWorkout(detail) : history.sessions.map((session) => `
+      <button class="ghost-button workout-history-row" data-history-action="detail" data-session-id="${escapeHtml(session.session_id)}" ${history.loading ? "disabled" : ""}>
+        <strong>${escapeHtml(session.workout_name || session.programme_day_id)}</strong>
+        <span>${escapeHtml(historySessionLabel(session))}</span>
+      </button>`).join("")}
+    ${!detail && !history.loading && !history.error && !history.sessions.length ? '<p class="summary-empty">No workout history yet. Completed and cancelled workouts will appear here.</p>' : ""}
+    ${!detail && history.next_cursor ? `<button class="ghost-button" data-history-action="more" ${history.loading ? "disabled" : ""}>Load More</button>` : ""}
+  </section>`;
+}
+
+function historicalExecutionStatus(execution) {
+  if (execution.status === "skipped") {
+    const reason = WORKOUT_SKIP_REASONS.find(([value]) => value === execution.skip_reason)?.[1];
+    return reason ? `Skipped · ${reason}` : "Skipped";
+  }
+  return {completed: "Completed", in_progress: "Partially logged", pending: "Not logged"}[execution.status] || execution.status;
+}
+
+function historicalSetResult(set) {
+  if (set.status === "skipped") {
+    const reason = WORKOUT_SKIP_REASONS.find(([value]) => value === set.skip_reason)?.[1];
+    return reason ? `Skipped · ${reason}` : "Skipped";
+  }
+  return formatSetResult(set).replace(" kg", ` ${set.load_unit || "kg"}`)
+    + (set.load_scope === "per_dumbbell" ? " (per dumbbell)" : "");
+}
+
+function renderHistoricalWorkout(detail) {
+  const session = detail.session;
+  return `<button class="ghost-button" data-history-action="back">← Back to history</button>
+    <h3>${escapeHtml(session.workout_name || session.programme_day_id)}</h3>
+    <p>${escapeHtml(historySessionLabel(session))} · Read-only</p>
+    ${(detail.executions || []).map((execution) => `<section class="workout-execution-card">
+      <h4>${escapeHtml(execution.exercise_name || execution.performed_exercise_id)}</h4>
+      <p>${escapeHtml(historicalExecutionStatus(execution))}</p>
+      <ul>${(execution.sets || []).map((set) => `<li>Set ${escapeHtml(set.set_ordinal)} (${escapeHtml(set.set_type || "working")}): ${escapeHtml(historicalSetResult(set))}${set.rir != null ? ` · RIR ${escapeHtml(set.rir)}` : ""}</li>`).join("")}</ul>
+      ${!execution.sets?.length ? '<p>No saved sets</p>' : ""}
+    </section>`).join("")}`;
 }

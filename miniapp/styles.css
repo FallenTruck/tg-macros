@@ -1560,3 +1560,6 @@ button:disabled {
 #nutrition-settings-status[data-tone="success"] { color: #31714b; }
 .bedtime-field { max-width: 240px; }
 @media (max-width: 600px) { .nutrition-settings { padding: 18px; } .settings-grid { grid-template-columns: minmax(0, 1fr); } .settings-save button { width: 100%; } }
+
+.workout-history-row { display: flex; flex-direction: column; align-items: flex-start; gap: 6px; width: 100%; margin: 12px 0; text-align: left; }
+#workout-history .workout-execution-card { margin-top: 12px; }

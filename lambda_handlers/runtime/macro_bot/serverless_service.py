@@ -265,6 +265,9 @@ class NutritionService:
     def active_workout(self, identity: ServerlessIdentity) -> Optional[dict[str, Any]]:
         return self.workout_execution.get_active_session(identity)
 
+    def list_workout_history(self, identity: ServerlessIdentity, *, limit: Any = 20, cursor: Optional[str] = None) -> dict[str, Any]:
+        return self.workout_execution.list_workout_history(identity, limit=limit, cursor=cursor)
+
     def workout_session(self, identity: ServerlessIdentity, session_id: str) -> dict[str, Any]:
         return self.workout_execution.get_session(identity, session_id)
 
