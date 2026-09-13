@@ -111,6 +111,15 @@ class WorkoutRecoveryBrowserTests(unittest.TestCase):
                 expect(edit.locator('input[name="load_value"]')).to_have_value('25')
                 expect(edit.locator('input[name="reps"]')).to_have_value('8')
                 edit.locator('input[name="reps"]').fill('11')
+                # The editor replaces the same row, without an extra section.
+                expect(row).to_have_attribute('data-edit-set', '')
+                expect(first.locator('.workout-set-row')).to_have_count(3)
+                output = project / 'artifacts/e2e/set-edit-inline'
+                output.mkdir(parents=True, exist_ok=True)
+                page.set_viewport_size({'width': 360, 'height': 800})
+                edit.evaluate("form => form.scrollIntoView({block: 'center'})")
+                edit.screenshot(path=str(output / 'editing-row.png'))
+                self.assertTrue(page.evaluate('document.documentElement.scrollWidth <= window.innerWidth'))
                 edit.get_by_role('button', name='Cancel edit').click()
                 expect(first.locator('[data-edit-set]')).to_have_count(0)
                 expect(row).to_contain_text('25 kg × 8')

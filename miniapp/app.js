@@ -909,16 +909,19 @@ function renderWorkoutExecution(execution, exercises) {
         ${options.map((item) => `<option value="${escapeHtml(item.exercise_id)}"${item.exercise_id === execution.performed_exercise_id ? " selected" : ""}>${escapeHtml(item.canonical_name)}</option>`).join("")}
       </select>
     </label>` : `<p class="workout-exercise-name">${escapeHtml(exercise.canonical_name || execution.performed_exercise_id)}</p>`;
-  const sets = (execution.sets || []).map((set) => `
+  const sets = (execution.sets || []).map((set) => {
+    if (workoutEditingSet?.executionId === execution.execution_id && workoutEditingSet.ordinal === Number(set.set_ordinal)) {
+      return renderSetForm(execution, Number(set.set_ordinal), set);
+    }
+    return `
     <div class="workout-set-row" data-testid="workout-set-row-${escapeHtml(execution.execution_id)}-${set.set_ordinal}">
       <span>${String(set.set_type || "working").toLowerCase() === "warmup" ? "Warm-up" : "Set"} ${set.set_ordinal}</span>
       <strong>${escapeHtml(formatSetResult(set))}</strong>
       <span>${set.status === "skipped" ? "Skipped" : "Saved"}</span>
       ${state.activeWorkout?.session?.status === "in_progress" && execution.status !== "skipped" && set.status !== "skipped"
         ? `<button class="ghost-button" type="button" data-action="edit-set" data-execution-id="${escapeHtml(execution.execution_id)}" data-ordinal="${set.set_ordinal}" aria-label="Edit set ${set.set_ordinal}"${workoutEditingSet ? " disabled" : ""}>Edit</button>` : ""}
-    </div>
-    ${workoutEditingSet?.executionId === execution.execution_id && workoutEditingSet.ordinal === Number(set.set_ordinal)
-      ? renderSetForm(execution, Number(set.set_ordinal), set) : ""}`).join("");
+    </div>`;
+  }).join("");
   const nextOrdinal = Math.max(0, ...(execution.sets || []).map((item) => Number(item.set_ordinal) || 0)) + 1;
   const setForm = execution.status === "skipped" ? "" : renderSetForm(execution, nextOrdinal);
   const skipControls = execution.status === "skipped" ? "" : renderSkipControls(
@@ -954,25 +957,35 @@ function renderSetForm(execution, ordinal, editingSet = null) {
   if (execution.execution_type === "timed") {
     fields = `<label>Seconds<input name="duration_seconds" type="number" min="1" inputmode="numeric" required${inputValue(previousSet?.duration_seconds)}></label>`;
   } else if (execution.execution_type === "side_aware_reps") {
-    fields = `<label>Load (kg)<input name="load_value" type="number" min="0" step="0.25" inputmode="decimal" required${inputValue(previousSet?.load_value)}></label><label>Left reps<input name="left_reps" type="number" min="1" inputmode="numeric" required${inputValue(previousSet?.side_reps?.left)}></label><label>Right reps<input name="right_reps" type="number" min="1" inputmode="numeric" required${inputValue(previousSet?.side_reps?.right)}></label>`;
+    fields = `<label>${editingSet ? "kg" : "Load (kg)"}<input name="load_value" type="number" min="0" step="0.25" inputmode="decimal" required${inputValue(previousSet?.load_value)}></label><label>Left reps<input name="left_reps" type="number" min="1" inputmode="numeric" required${inputValue(previousSet?.side_reps?.left)}></label><label>Right reps<input name="right_reps" type="number" min="1" inputmode="numeric" required${inputValue(previousSet?.side_reps?.right)}></label>`;
   } else {
-    const load = execution.loading_convention === "per_dumbbell_kg" ? "Weight per dumbbell (kg)" : "Load (kg)";
+    const load = execution.loading_convention === "per_dumbbell_kg"
+      ? (editingSet ? "kg each" : "Weight per dumbbell (kg)")
+      : (editingSet ? "kg" : "Load (kg)");
     fields = execution.execution_type === "loaded_reps" ? `<label>${load}<input name="load_value" type="number" min="0" step="0.25" inputmode="decimal" required${inputValue(previousSet?.load_value)}></label>` : "";
     if (execution.execution_type === "optional_load_reps") {
-      fields = `<label>Weight (kg) <span class="optional-label">optional</span><input name="load_value" type="number" min="0" step="0.25" inputmode="decimal" placeholder="Bodyweight"${inputValue(previousSet?.load_value)}></label>`;
+      fields = `<label>${editingSet ? "kg (optional)" : 'Weight (kg) <span class="optional-label">optional</span>'}<input name="load_value" type="number" min="0" step="0.25" inputmode="decimal" placeholder="Bodyweight"${inputValue(previousSet?.load_value)}></label>`;
     }
     const repsLabel = execution.performed_exercise_id === "russian_twist" ? "Reps (each side counts as 1)" : "Reps";
     fields += `<label>${repsLabel}<input name="reps" type="number" min="1" inputmode="numeric" required${inputValue(previousSet?.reps)}></label>`;
   }
   if (execution.execution_type !== "timed") {
-    fields += `<label>RIR <span class="optional-label">optional</span><input name="rir" type="number" min="0" max="10" step="0.5" inputmode="decimal"${inputValue(previousSet?.rir)}></label>`;
+    fields += `<label>RIR${editingSet ? "" : ' <span class="optional-label">optional</span>'}<input name="rir" aria-label="RIR (optional)" type="number" min="0" max="10" step="0.5" inputmode="decimal"${inputValue(previousSet?.rir)}></label>`;
   }
   const skipControls = renderSkipControls(
     "set",
     `${prefix} data-execution-revision="${execution.revision}"`,
   );
+  if (editingSet) {
+    const label = String(editingSet.set_type || "working").toLowerCase() === "warmup" ? "Warm-up" : "Set";
+    return `<form class="workout-set-form workout-set-row workout-set-row-editing" data-testid="workout-set-row-${escapeHtml(execution.execution_id)}-${ordinal}" data-set-form data-edit-set data-set-revision="${editingSet.revision}" ${prefix} data-execution-revision="${execution.revision}" data-exercise-id="${escapeHtml(execution.performed_exercise_id)}" aria-label="Edit ${label.toLowerCase()} ${ordinal}">
+      <span class="workout-set-number">${label} ${ordinal}</span>
+      <div class="workout-set-fields">${fields}</div>
+      <div class="workout-set-actions"><button class="primary" data-testid="workout-save-set" type="submit" aria-label="Save changes">Save</button><button class="ghost-button" type="button" data-action="cancel-edit-set" aria-label="Cancel edit">Cancel</button></div>
+    </form>`;
+  }
   const repeatButton = previousSet && !editingSet ? `<button class="ghost-button workout-repeat-button" type="button" data-testid="workout-repeat-set" data-action="repeat-previous-set">Repeat previous set</button>` : "";
-  return `<form class="workout-set-form" data-testid="workout-set-form-${escapeHtml(execution.execution_id)}-${ordinal}" data-set-form ${editingSet ? `data-edit-set data-set-revision="${editingSet.revision}"` : ""} ${prefix} data-execution-revision="${execution.revision}" data-exercise-id="${escapeHtml(execution.performed_exercise_id)}">${editingSet ? `<p class="workout-target">Editing set ${ordinal}</p>` : ""}<div class="workout-set-fields">${fields}</div>${repeatButton}<div class="workout-set-actions"><button class="primary" data-testid="workout-save-set" type="submit">${editingSet ? "Save changes" : `Save Set ${ordinal}`}</button>${editingSet ? '<button class="ghost-button" type="button" data-action="cancel-edit-set">Cancel edit</button>' : skipControls}</div></form>`;
+  return `<form class="workout-set-form" data-testid="workout-set-form-${escapeHtml(execution.execution_id)}-${ordinal}" data-set-form ${prefix} data-execution-revision="${execution.revision}" data-exercise-id="${escapeHtml(execution.performed_exercise_id)}"><div class="workout-set-fields">${fields}</div>${repeatButton}<div class="workout-set-actions"><button class="primary" data-testid="workout-save-set" type="submit">Save Set ${ordinal}</button>${skipControls}</div></form>`;
 }
 
 function repeatPreviousSet(formElement, execution) {
@@ -1035,7 +1048,9 @@ async function handleWorkoutClick(event) {
           exerciseId: execution.performed_exercise_id, revision: Number(saved.revision)};
       }
       renderWorkoutSession();
-      workoutSessionEl.querySelector('[data-edit-set] input[name="reps"], [data-edit-set] input')?.focus();
+      const editor = workoutSessionEl.querySelector('[data-edit-set]');
+      editor?.scrollIntoView({block: "center", behavior: "auto"});
+      (editor?.querySelector('input[name="reps"]') || editor?.querySelector('input'))?.focus({preventScroll: true});
       return;
     }
     if (action === "repeat-previous-set") {
