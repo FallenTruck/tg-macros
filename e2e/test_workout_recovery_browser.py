@@ -102,6 +102,74 @@ class WorkoutRecoveryBrowserTests(unittest.TestCase):
                 expect(second.locator('.workout-set-row')).to_have_count(1)
                 expect(second.locator('form')).to_have_attribute('data-ordinal', '2')
                 self.assertEqual(len(writes), count)
+                # Saved sets can be corrected even after the exercise is complete.
+                # Keep the next-set draft separate from the edit form.
+                first.locator('form input[name="reps"]').fill('12')
+                row = first.locator('.workout-set-row').nth(1)
+                row.get_by_role('button', name='Edit set 2').click()
+                edit = first.locator('[data-edit-set]')
+                expect(edit.locator('input[name="load_value"]')).to_have_value('25')
+                expect(edit.locator('input[name="reps"]')).to_have_value('8')
+                edit.locator('input[name="reps"]').fill('11')
+                edit.get_by_role('button', name='Cancel edit').click()
+                expect(first.locator('[data-edit-set]')).to_have_count(0)
+                expect(row).to_contain_text('25 kg × 8')
+                row.get_by_role('button', name='Edit set 2').click()
+                expect(edit.locator('input[name="reps"]')).to_have_value('8')
+                edit.locator('input[name="reps"]').fill('10')
+                edit.get_by_role('button', name='Save changes').click()
+                expect(first.locator('[data-edit-set]')).to_have_count(0)
+                expect(row).to_contain_text('25 kg × 10')
+                expect(first.locator('form input[name="reps"]')).to_have_value('12')
+                expect(first.locator('.workout-set-row')).to_have_count(3)
+
+                # Another device wins: reject stale edits and show its saved values.
+                row.get_by_role('button', name='Edit set 2').click()
+                edit.locator('input[name="reps"]').fill('13')
+                current = fixture.service.active_workout(user)
+                execution = next(ex for ex in current['executions'] if ex['execution_id'] == eid)
+                saved = next(item for item in execution['sets'] if item['set_ordinal'] == 2)
+                fixture.service.put_workout_set(user, sid, eid, 2,
+                    {'load_value': 25, 'reps': 9, 'expected_revision': saved['revision'],
+                     'execution_expected_revision': execution['revision']})
+                edit.get_by_role('button', name='Save changes').click()
+                expect(edit).to_have_count(0)
+                expect(row).to_contain_text('25 kg × 9')
+                self.assertEqual(writes[-1][1], 409)
+
+                # A lost edit response reconciles without duplicating the set.
+                row.get_by_role('button', name='Edit set 2').click()
+                edit.locator('input[name="reps"]').fill('10')
+                faults['lose_save'] = True
+                edit.get_by_role('button', name='Save changes').click()
+                expect(edit).to_have_count(0)
+                expect(row).to_contain_text('25 kg × 10')
+                expect(first.locator('.workout-set-row')).to_have_count(3)
+                page.reload()
+                page.locator('[data-route="workout"]').click()
+                expect(row).to_contain_text('25 kg × 10')
+
+                # Submission locks both the UI and existing-set API updates.
+                current = fixture.service.active_workout(user)
+                for execution in current['executions'][1:]:
+                    fixture.service.skip_workout_exercise(user, sid, execution['execution_id'],
+                        {'expected_revision': execution['revision']})
+                page.reload()
+                page.locator('[data-route="workout"]').click()
+                row.get_by_role('button', name='Edit set 2').click()
+                expect(page.get_by_test_id('submit-workout')).to_be_disabled()
+                edit.get_by_role('button', name='Cancel edit').click()
+                page.get_by_test_id('submit-workout').click()
+                expect(page.get_by_test_id('active-workout')).to_have_count(0)
+                expect(page.locator('[data-action="edit-set"]')).to_have_count(0)
+                before = fixture.service.workout_session(user, sid)
+                execution = next(ex for ex in before['executions'] if ex['execution_id'] == eid)
+                saved = next(item for item in execution['sets'] if item['set_ordinal'] == 2)
+                response = fixture.client.put(f'/api/workout/sessions/{sid}/executions/{eid}/sets/2',
+                    json={'load_value': 25, 'reps': 99, 'expected_revision': saved['revision'],
+                          'execution_expected_revision': execution['revision']}, headers={'Origin': 'https://testserver'})
+                self.assertEqual(response.status_code, 409)
+                self.assertEqual(fixture.service.workout_session(user, sid), before)
                 self.assertEqual(errors, [])
                 browser.close()
         finally:

@@ -704,6 +704,7 @@ function workoutDayAction(day) {
 
 let workoutMutationPending = false;
 let workoutNeedsRefresh = false;
+let workoutEditingSet = null;
 
 function workoutDraftKey(form) {
   return [form.dataset.sessionId, form.dataset.executionId, form.dataset.ordinal, form.dataset.exerciseId].join("|");
@@ -786,6 +787,13 @@ function renderWorkoutSession() {
   }
   const drafts = captureWorkoutDrafts();
   const active = state.activeWorkout;
+  if (workoutEditingSet) {
+    const execution = active?.executions?.find((item) => item.execution_id === workoutEditingSet.executionId);
+    const saved = execution?.sets?.find((item) => Number(item.set_ordinal) === workoutEditingSet.ordinal);
+    if (active?.session?.status !== "in_progress" || execution?.status === "skipped"
+        || execution?.performed_exercise_id !== workoutEditingSet.exerciseId
+        || Number(saved?.revision) !== workoutEditingSet.revision) workoutEditingSet = null;
+  }
   workoutSessionEl.hidden = !active?.session || state.workoutMode !== WORKOUT_ACTIVE_MODE;
   pageShell?.classList.toggle("workout-active", Boolean(active?.session));
   renderWorkoutCompletionDock(active);
@@ -854,8 +862,9 @@ function renderWorkoutCompletionDock(active) {
     <div class="workout-completion-copy">
       <span class="section-label">Workout progress</span>
       <strong>${summary.completed} / ${summary.total} exercises completed</strong>
+      ${workoutEditingSet ? '<span>Save or cancel your set edit before submitting.</span>' : ""}
     </div>
-    <button class="primary" type="button" data-testid="submit-workout" data-action="submit-workout"${summary.ready ? "" : " disabled"}>Submit Workout</button>
+    <button class="primary" type="button" data-testid="submit-workout" data-action="submit-workout"${summary.ready && !workoutEditingSet ? "" : " disabled"}>Submit Workout</button>
   `;
 }
 
@@ -905,7 +914,11 @@ function renderWorkoutExecution(execution, exercises) {
       <span>${String(set.set_type || "working").toLowerCase() === "warmup" ? "Warm-up" : "Set"} ${set.set_ordinal}</span>
       <strong>${escapeHtml(formatSetResult(set))}</strong>
       <span>${set.status === "skipped" ? "Skipped" : "Saved"}</span>
-    </div>`).join("");
+      ${state.activeWorkout?.session?.status === "in_progress" && execution.status !== "skipped" && set.status !== "skipped"
+        ? `<button class="ghost-button" type="button" data-action="edit-set" data-execution-id="${escapeHtml(execution.execution_id)}" data-ordinal="${set.set_ordinal}" aria-label="Edit set ${set.set_ordinal}"${workoutEditingSet ? " disabled" : ""}>Edit</button>` : ""}
+    </div>
+    ${workoutEditingSet?.executionId === execution.execution_id && workoutEditingSet.ordinal === Number(set.set_ordinal)
+      ? renderSetForm(execution, Number(set.set_ordinal), set) : ""}`).join("");
   const nextOrdinal = Math.max(0, ...(execution.sets || []).map((item) => Number(item.set_ordinal) || 0)) + 1;
   const setForm = execution.status === "skipped" ? "" : renderSetForm(execution, nextOrdinal);
   const skipControls = execution.status === "skipped" ? "" : renderSkipControls(
@@ -930,9 +943,9 @@ function renderSkipControls(kind, buttonAttributes) {
   return `<div class="workout-skip-controls" data-skip-kind="${kind}"><select data-skip-reason-select aria-label="${label}">${options}</select><button class="ghost-button" type="button" data-testid="workout-skip-${kind}" data-action="skip-${kind}" aria-label="${buttonLabel}" ${buttonAttributes}>${buttonLabel}</button></div>`;
 }
 
-function renderSetForm(execution, ordinal) {
+function renderSetForm(execution, ordinal, editingSet = null) {
   const prefix = `data-session-id="${escapeHtml(execution.session_id)}" data-execution-id="${escapeHtml(execution.execution_id)}" data-ordinal="${ordinal}"`;
-  const previousSet = [...(execution.sets || [])]
+  const previousSet = editingSet || [...(execution.sets || [])]
     .filter((set) => String(set.set_type || "working").trim().toLowerCase() === "working" && String(set.status || "completed").trim().toLowerCase() === "completed")
     .sort((left, right) => (Number(left.set_ordinal) || 0) - (Number(right.set_ordinal) || 0))
     .slice(-1)[0];
@@ -958,8 +971,8 @@ function renderSetForm(execution, ordinal) {
     "set",
     `${prefix} data-execution-revision="${execution.revision}"`,
   );
-  const repeatButton = previousSet ? `<button class="ghost-button workout-repeat-button" type="button" data-testid="workout-repeat-set" data-action="repeat-previous-set">Repeat previous set</button>` : "";
-  return `<form class="workout-set-form" data-testid="workout-set-form-${escapeHtml(execution.execution_id)}-${ordinal}" data-set-form ${prefix} data-execution-revision="${execution.revision}" data-exercise-id="${escapeHtml(execution.performed_exercise_id)}"><div class="workout-set-fields">${fields}</div>${repeatButton}<div class="workout-set-actions"><button class="primary" data-testid="workout-save-set" type="submit">Save Set ${ordinal}</button>${skipControls}</div></form>`;
+  const repeatButton = previousSet && !editingSet ? `<button class="ghost-button workout-repeat-button" type="button" data-testid="workout-repeat-set" data-action="repeat-previous-set">Repeat previous set</button>` : "";
+  return `<form class="workout-set-form" data-testid="workout-set-form-${escapeHtml(execution.execution_id)}-${ordinal}" data-set-form ${editingSet ? `data-edit-set data-set-revision="${editingSet.revision}"` : ""} ${prefix} data-execution-revision="${execution.revision}" data-exercise-id="${escapeHtml(execution.performed_exercise_id)}">${editingSet ? `<p class="workout-target">Editing set ${ordinal}</p>` : ""}<div class="workout-set-fields">${fields}</div>${repeatButton}<div class="workout-set-actions"><button class="primary" data-testid="workout-save-set" type="submit">${editingSet ? "Save changes" : `Save Set ${ordinal}`}</button>${editingSet ? '<button class="ghost-button" type="button" data-action="cancel-edit-set">Cancel edit</button>' : skipControls}</div></form>`;
 }
 
 function repeatPreviousSet(formElement, execution) {
@@ -1010,6 +1023,21 @@ async function handleWorkoutClick(event) {
       setWorkoutMode(WORKOUT_PROGRAMME_MODE);
       return;
     }
+    if (action === "edit-set" || action === "cancel-edit-set") {
+      if (state.activeWorkout?.session?.status !== "in_progress") return;
+      if (action === "cancel-edit-set") {
+        workoutEditingSet = null;
+      } else {
+        const execution = state.activeWorkout.executions.find((item) => item.execution_id === button.dataset.executionId);
+        const saved = execution?.sets?.find((item) => Number(item.set_ordinal) === Number(button.dataset.ordinal));
+        if (!saved || saved.status === "skipped" || execution.status === "skipped") return;
+        workoutEditingSet = {executionId: execution.execution_id, ordinal: Number(saved.set_ordinal),
+          exerciseId: execution.performed_exercise_id, revision: Number(saved.revision)};
+      }
+      renderWorkoutSession();
+      workoutSessionEl.querySelector('[data-edit-set] input[name="reps"], [data-edit-set] input')?.focus();
+      return;
+    }
     if (action === "repeat-previous-set") {
       const formElement = button.closest("[data-set-form]");
       const execution = state.activeWorkout?.executions.find((item) => item.execution_id === formElement?.dataset.executionId);
@@ -1040,6 +1068,7 @@ async function handleWorkoutClick(event) {
       return response;
     }
     if (action === "submit-workout") {
+      if (workoutEditingSet) return;
       const response = await workoutMutation(`/api/workout/sessions/${encodeURIComponent(state.activeWorkout.session.session_id)}/complete`, {method: "POST", body: JSON.stringify({expected_revision: state.activeWorkout.session.revision})});
       state.activeWorkout = null;
       setWorkoutMode(WORKOUT_PROGRAMME_MODE);
@@ -1097,11 +1126,20 @@ async function handleWorkoutSubmit(event) {
   if (values.get("duration_seconds") !== null && values.get("duration_seconds") !== "") payload.duration_seconds = Number(values.get("duration_seconds"));
   if (values.get("rir") !== null && values.get("rir") !== "") payload.rir = Number(values.get("rir"));
   const existing = (execution.sets || []).find((item) => Number(item.set_ordinal) === Number(formElement.dataset.ordinal));
-  if (existing) payload.expected_revision = Number(existing.revision);
+  if (existing) {
+    payload.expected_revision = Number(formElement.dataset.setRevision ?? existing.revision);
+    // Preserve saved metadata that is not editable in the set form.
+    for (const key of ["set_type", "load_unit", "load_scope", "notes"]) {
+      if (existing[key] != null) payload[key] = existing[key];
+    }
+  }
+  const isEditing = formElement.hasAttribute("data-edit-set");
   try {
     const response = await workoutMutation(`/api/workout/sessions/${encodeURIComponent(formElement.dataset.sessionId)}/executions/${encodeURIComponent(formElement.dataset.executionId)}/sets/${formElement.dataset.ordinal}`, {method: "PUT", body: JSON.stringify(payload)});
     state.activeWorkout = response;
+    if (isEditing) workoutEditingSet = null;
     renderWorkoutSession();
+    if (isEditing) setStatus("Set updated. You can edit saved sets until you submit the workout.", "success");
   } catch (error) {
     setStatus(error.message || "Could not save the set.", "error");
   }

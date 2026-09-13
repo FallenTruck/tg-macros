@@ -253,7 +253,13 @@ forms' entered values across renders, keyed by session, exercise execution,
 set ordinal, and selected exercise. Failed or uncertain writes trigger an active
 session refresh before another mutation is allowed. If that refresh also fails,
 the next action refreshes only; the user reviews the recovered state before
-saving again. Drafts remain in the current page, not durable offline storage.
+saving again. Saved sets expose an Edit action while the session is in progress, prefilled
+from that set and saved through the existing revision-checked PUT endpoint.
+Saving or cancelling the edit returns to the summary; submission waits for the
+edit to be resolved. A changed set revision after reconciliation closes the
+stale editor so the user sees the persisted value before reopening it. Submitted
+workouts remain read-only in both the UI and the API.
+Drafts remain in the current page, not durable offline storage.
 
 Generated Mini App links remain valid for 60 minutes from link creation. The
 API rechecks this launch deadline on every request, including workout set saves.

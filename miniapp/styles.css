@@ -1235,6 +1235,7 @@ button:disabled {
 }
 
 .workout-set-row {
+  flex-wrap: wrap;
   justify-content: flex-start;
   padding: 9px 10px;
   border-radius: 12px;
