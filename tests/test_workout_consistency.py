@@ -124,3 +124,14 @@ class WorkoutConsistencyTests(unittest.TestCase):
         self.assertEqual(saved['load_value'], 20.5)
         for record in (result['session'], result['executions'][0]):
             self.assertFalse({'PK', 'SK', 'entity_type'} & record.keys())
+
+    def test_api_role_allows_transactional_session_condition_checks(self):
+        import re
+        from pathlib import Path
+        template = (Path(__file__).resolve().parents[1] / 'template.yaml').read_text()
+        api = template.split('  ApiFunction:\n', 1)[1].split('\n  TelegramEventsQueue:', 1)[0]
+        statement = re.search(
+            r'(?m)^ {14}Action:\n((?: {16}- [^\n]+\n)+) {14}Resource: !GetAtt FitnessDataTable\.Arn', api)
+        self.assertIsNotNone(statement)
+        self.assertIn('dynamodb:ConditionCheckItem', statement.group(1))
+        self.assertIn('dynamodb:TransactWriteItems', statement.group(1))

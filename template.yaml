@@ -303,6 +303,7 @@ Resources:
                 - dynamodb:Query
                 - dynamodb:DeleteItem
                 - dynamodb:TransactWriteItems
+                - dynamodb:ConditionCheckItem
               Resource: !GetAtt FitnessDataTable.Arn
             - Effect: Allow
               Action:
